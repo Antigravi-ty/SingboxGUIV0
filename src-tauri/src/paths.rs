@@ -13,6 +13,26 @@ pub fn resolve_app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+pub fn default_managed_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "sing-box.exe"
+    } else {
+        "sing-box"
+    }
+}
+
+pub fn default_managed_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join(default_managed_binary_name()))
+}
+
+pub fn default_singbox_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("config.json"))
+}
+
+pub fn default_surge_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("aSingbox127.conf"))
+}
+
 fn target_sidecar_filenames() -> Vec<&'static str> {
     if cfg!(target_os = "windows") {
         vec![
@@ -35,10 +55,45 @@ fn target_sidecar_filenames() -> Vec<&'static str> {
     }
 }
 
+pub fn ensure_executable_permissions(path: &PathBuf) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("xattr")
+            .args(["-d", "com.apple.quarantine"])
+            .arg(path)
+            .output();
+    }
+}
+
 pub fn candidate_singbox_paths(app: &AppHandle) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let names = target_sidecar_filenames();
 
+    // 1. Primary Canonical Location: Tauri Application Support / Config Dir
+    if let Ok(dir) = resolve_app_config_dir(app) {
+        for name in &names {
+            candidates.push(dir.join(name));
+        }
+    }
+
+    // 2. Bundled Tauri Resource Dir
+    if let Ok(res_dir) = app.path().resource_dir() {
+        for name in &names {
+            candidates.push(res_dir.join(name));
+            candidates.push(res_dir.join("binaries").join(name));
+        }
+    }
+
+    // 3. Development Project Root & Sidecar Directories
     if let Ok(cwd) = std::env::current_dir() {
         let mut bases = vec![cwd.clone()];
         if let Some(parent) = cwd.parent() {
@@ -54,19 +109,7 @@ pub fn candidate_singbox_paths(app: &AppHandle) -> Vec<PathBuf> {
         }
     }
 
-    if let Ok(dir) = resolve_app_config_dir(app) {
-        for name in &names {
-            candidates.push(dir.join(name));
-        }
-    }
-
-    if let Ok(res_dir) = app.path().resource_dir() {
-        for name in &names {
-            candidates.push(res_dir.join(name));
-            candidates.push(res_dir.join("binaries").join(name));
-        }
-    }
-
+    // 4. System-wide Installations (Homebrew / usr/local)
     candidates.push(PathBuf::from("/opt/homebrew/bin/sing-box"));
     candidates.push(PathBuf::from("/usr/local/bin/sing-box"));
     candidates.push(PathBuf::from("/usr/bin/sing-box"));
@@ -74,13 +117,32 @@ pub fn candidate_singbox_paths(app: &AppHandle) -> Vec<PathBuf> {
 }
 
 pub fn resolve_singbox_binary(app: &AppHandle) -> PathBuf {
+    let managed_target = default_managed_binary_path(app).ok();
+    if let Some(ref target) = managed_target {
+        if target.is_file() {
+            ensure_executable_permissions(target);
+            return target.clone();
+        }
+    }
+
     for candidate in candidate_singbox_paths(app) {
         if candidate.is_file() {
+            // Auto-stage into Application Support directory so binary + config.json live together
+            if let Some(ref target) = managed_target {
+                if &candidate != target {
+                    if std::fs::copy(&candidate, target).is_ok() {
+                        ensure_executable_permissions(target);
+                        return target.clone();
+                    }
+                }
+            }
+            ensure_executable_permissions(&candidate);
             return candidate;
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        return cwd.join("bin").join("sing-box");
+
+    if let Some(target) = managed_target {
+        return target;
     }
     PathBuf::from("/usr/local/bin/sing-box")
 }

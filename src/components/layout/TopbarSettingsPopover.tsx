@@ -222,7 +222,7 @@ export const TopbarSettingsPopover: React.FC = () => {
               </button>
             </div>
 
-            {/* 4. Local Binary Placement Guide */}
+            {/* 4. Application Support & Binary Placement Guide */}
             <div
               style={{
                 padding: "8px 10px",
@@ -243,12 +243,15 @@ export const TopbarSettingsPopover: React.FC = () => {
                 }}
               >
                 <FolderCode size={12} />
-                <span>Local Sing-box Binary Search Order</span>
+                <span>Application Support &amp; Binary Storage</span>
               </div>
               <div style={{ color: "var(--fg-muted)" }}>
-                1. <code>./bin/sing-box</code> (Git-ignored project dir)
+                1. <code>~/Library/Application Support/com.antigravity.singboxguiv0/</code>{" "}
+                (Unified store for <code>sing-box</code>, <code>config.json</code> &amp;{" "}
+                <code>aSingbox127.conf</code>)
                 <br />
-                2. <code>./src-tauri/binaries/sing-box</code> (Tauri sidecar)
+                2. <code>./bin/sing-box</code> &amp; <code>./src-tauri/binaries/</code>{" "}
+                (Auto-imported into Application Support)
                 <br />
                 3. <code>/opt/homebrew/bin/sing-box</code> &amp;{" "}
                 <code>/usr/local/bin/sing-box</code>

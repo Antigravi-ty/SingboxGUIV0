@@ -515,9 +515,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   runSingboxCheck: async () => {
-    const jsonText = JSON.stringify(get().singboxConfig, null, 2);
-    const res = await validateSingboxConfigWithCore(jsonText);
+    const s = get();
+    const jsonText = JSON.stringify(s.singboxConfig, null, 2);
+    const surgeText = s.surgeConfigText;
+    const res = await validateSingboxConfigWithCore(jsonText, surgeText);
     set({ lastCheckResult: res });
+    if (res.serviceReloaded) {
+      get().appendLog(
+        `[INFO][Service] Dynamic config sync complete -> hot-reloaded running sing-box service (${res.singboxConfigPath}).`
+      );
+    }
   },
 
   mitmRules: [],

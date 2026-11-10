@@ -72,6 +72,11 @@ export interface SingboxOutbound {
   idle_session_check_interval?: string;
   idle_session_timeout?: string;
   min_idle_session?: number;
+  outbounds?: string[];
+  url?: string;
+  interval?: string;
+  tolerance?: number;
+  idle_timeout?: string;
   tls?: SingboxTlsConfig;
   transport?: SingboxTransportConfig;
   [key: string]: unknown;
@@ -164,6 +169,20 @@ export interface ConversionSubscriptionSummary {
   autoDetectedDoHServer?: string;
 }
 
+export interface ConfigInspectSummary {
+  config_dir: string;
+  singbox_config_path: string;
+  surge_config_path: string;
+  total_outbounds: number;
+  proxy_outbound_count: number;
+  urltest_pool_count: number;
+  socks_user_count: number;
+  dns_server_count: number;
+  listen_address: string;
+  file_size_bytes: number;
+  empty_workspace: boolean;
+}
+
 export interface SingboxCheckResult {
   valid: boolean;
   version: string;
@@ -171,15 +190,37 @@ export interface SingboxCheckResult {
   checkedAt: string;
   binaryFound?: boolean;
   binaryPath?: string;
+  configDir?: string;
+  singboxConfigPath?: string;
+  surgeConfigPath?: string;
+  summary?: ConfigInspectSummary;
+  serviceReloaded?: boolean;
+  emptyWorkspace?: boolean;
 }
 
 export interface BinaryStatusInfo {
   imported: boolean;
   binary_name: string | null;
   binary_path: string | null;
+  managed_binary_path?: string | null;
+  config_dir?: string | null;
+  singbox_config_path?: string | null;
+  surge_config_path?: string | null;
   file_size: number | null;
   version?: string | null;
   searched_paths?: string[];
+}
+
+export interface SingboxServiceStatus {
+  running: boolean;
+  pid: number | null;
+  binary_path: string;
+  config_path: string;
+  surge_config_path: string;
+  config_dir: string;
+  listen_address: string;
+  message: string;
+  recent_logs: string[];
 }
 
 export type ConnectivityTestMethod =

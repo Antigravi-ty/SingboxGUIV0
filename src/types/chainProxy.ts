@@ -6,6 +6,8 @@ export type ChainNamingSchemeId =
   | "scheme_c_exit_at";
 
 export type ChainExpansionMode =
+  | "urltest_pool_to_exits"
+  | "urltest_pool_single_hop"
   | "primary_entry_to_all_exits"
   | "round_robin_pairing"
   | "full_cartesian";
@@ -41,6 +43,7 @@ export interface ChainLinkRule {
   exitNodeFilterRegex: string;
   expansionMode: ChainExpansionMode;
   maxGeneratedNodes: number;
+  preferredPrimaryEntryTag?: string;
 }
 
 export interface GeneratedProxyEndpoint {

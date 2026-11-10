@@ -1,7 +1,9 @@
 import React from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   FileCode2,
+  FolderOpen,
   GitBranch,
   KeyRound,
   Moon,
@@ -12,6 +14,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { openAppConfigFolder } from "../../services/tauriGateway";
 import { useThemeStore } from "../../stores/themeStore";
 import {
   ActiveWorkspaceTab,
@@ -141,32 +144,50 @@ export const TopNavigationHeader: React.FC = () => {
         >
           <button
             type="button"
+            className="primer-btn"
+            onClick={() => openAppConfigFolder().catch(() => {})}
+            title={
+              lastCheckResult?.configDir
+                ? `Open ${lastCheckResult.configDir} (contains config.json, aSingbox127.conf, sing-box)`
+                : "Open Application Support Configuration Folder"
+            }
+          >
+            <FolderOpen size={13} />
+            <span>Open Config Folder</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => runSingboxCheck()}
             className={`primer-btn ${
               lastCheckResult === null
                 ? ""
-                : lastCheckResult.valid
-                ? "primer-btn-status-success"
-                : "primer-btn-status-danger"
+                : !lastCheckResult.valid
+                ? "primer-btn-status-danger"
+                : lastCheckResult.emptyWorkspace
+                ? "primer-btn-status-attention"
+                : "primer-btn-status-success"
             }`}
             title={
               lastCheckResult?.commandOutput ||
-              "Validate generated config.json against Sing-box 1.14.4 schema"
+              "Sync & validate config.json in Application Support against Sing-box 1.14.4"
             }
           >
-            {lastCheckResult?.valid !== false ? (
-              <CheckCircle2 size={13} />
-            ) : (
+            {lastCheckResult?.valid === false ? (
               <XCircle size={13} />
+            ) : lastCheckResult?.emptyWorkspace ? (
+              <AlertTriangle size={13} />
+            ) : (
+              <CheckCircle2 size={13} />
             )}
             <span>
               {lastCheckResult
-                ? lastCheckResult.valid
-                  ? lastCheckResult.binaryFound === false
-                    ? "1.14.4 Schema: PASS"
-                    : "1.14.4 Check: PASS"
-                  : "1.14.4 Check: FAIL"
-                : "Verify 1.14.4 Config"}
+                ? !lastCheckResult.valid
+                  ? "1.14.4 Check: FAIL"
+                  : lastCheckResult.emptyWorkspace
+                  ? "config.json: 0 Nodes"
+                  : `1.14.4 Synced (${endpoints.length} slots)`
+                : "Sync & Verify Config"}
             </span>
           </button>
 

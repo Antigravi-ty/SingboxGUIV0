@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Copy, Download, GitBranch } from "lucide-react";
+import { Copy, Download, FolderOpen, GitBranch } from "lucide-react";
+import { openAppConfigFolder } from "../../services/tauriGateway";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { triggerTextFileDownload } from "../../utils/subscriptionHelpers";
 import { ChainRegexNamingTesterPanel } from "./ChainRegexNamingTesterPanel";
@@ -17,6 +18,8 @@ export const ChainTopologyView: React.FC = () => {
   const surgeConfigText = useWorkspaceStore((s) => s.surgeConfigText);
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const lastCheckResult = useWorkspaceStore((s) => s.lastCheckResult);
+  const appendLog = useWorkspaceStore((s) => s.appendLog);
 
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
@@ -30,6 +33,23 @@ export const ChainTopologyView: React.FC = () => {
     }
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      const summary = await openAppConfigFolder();
+      setCopyFeedback(`Opened ${summary.config_dir}`);
+      appendLog(
+        `[INFO][ConfigDir] Opened Application Support folder: ${summary.config_dir}`
+      );
+      setTimeout(() => setCopyFeedback(null), 3000);
+    } catch (err: any) {
+      setCopyFeedback(`Failed to open folder: ${err?.message || String(err)}`);
+    }
+  };
+
+  const activeConfigDir =
+    lastCheckResult?.configDir ||
+    "~/Library/Application Support/com.antigravity.singboxguiv0";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Top Export Action Bar */}
@@ -41,19 +61,19 @@ export const ChainTopologyView: React.FC = () => {
           <div className="primer-banner-content">
             <div className="primer-banner-title">
               Universal Sing-box 1.14.4 SOCKS5 Bridge + Surge 5.10 Smart
-              Transition Engine
+              Transition Engine (Auto-Synced to Application Support)
             </div>
             <div className="primer-banner-description">
-              All protocols (VLESS Reality, Hysteria2 port-hop, AnyTLS, VMess,
-              SS-2022, Trojan, ECH) are handled 100% by Sing-box 1.14.4 and
-              exported to Surge 5.10 as authenticated SOCKS5 endpoints (
+              <code>config.json</code> and <code>aSingbox127.conf</code> are
+              dynamically written to{" "}
+              <code>{activeConfigDir}</code> whenever subscriptions or chain
+              rules change (
               <code>
                 {listenIp}:{listenPort}
               </code>
-              , users{" "}
+              ,{" "}
               <code>
-                000..
-                {String(Math.max(0, endpoints.length - 1)).padStart(3, "0")}
+                {endpoints.length} active SOCKS5 endpoints
               </code>
               ).
               {copyFeedback && (
@@ -68,6 +88,15 @@ export const ChainTopologyView: React.FC = () => {
           <button
             type="button"
             className="primer-btn primer-btn-primary"
+            onClick={handleOpenFolder}
+            title={`Open ${activeConfigDir} in Finder / Explorer`}
+          >
+            <FolderOpen size={13} />
+            <span>Open Config Folder</span>
+          </button>
+          <button
+            type="button"
+            className="primer-btn"
             onClick={() =>
               triggerTextFileDownload(
                 JSON.stringify(singboxConfig, null, 2),
@@ -77,7 +106,7 @@ export const ChainTopologyView: React.FC = () => {
             }
           >
             <Download size={13} />
-            <span>Export config.json (Sing-box 1.14.4)</span>
+            <span>Export config.json</span>
           </button>
           <button
             type="button"
@@ -91,7 +120,7 @@ export const ChainTopologyView: React.FC = () => {
             }
           >
             <Download size={13} />
-            <span>Export aSingbox127.conf (Surge 5.10)</span>
+            <span>Export aSingbox127.conf</span>
           </button>
           <button
             type="button"

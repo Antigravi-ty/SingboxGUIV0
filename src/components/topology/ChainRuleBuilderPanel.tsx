@@ -19,6 +19,8 @@ export const ChainRuleBuilderPanel: React.FC = () => {
     [providerNodes]
   );
 
+  const directNodes = useWorkspaceStore((s) => s.directNodes);
+
   const [newHopCount, setNewHopCount] = useState<1 | 2>(1);
   const [newEntryPrefix, setNewEntryPrefix] = useState<string>("");
   const [newEntryFilter, setNewEntryFilter] = useState<string>("");
@@ -27,8 +29,27 @@ export const ChainRuleBuilderPanel: React.FC = () => {
   const [newExitPrefix, setNewExitPrefix] = useState<string>("");
   const [newExitFilter, setNewExitFilter] = useState<string>("");
   const [newExpansionMode, setNewExpansionMode] =
-    useState<ChainExpansionMode>("primary_entry_to_all_exits");
-  const [newMaxNodes, setNewMaxNodes] = useState<number>(20);
+    useState<ChainExpansionMode>("urltest_pool_to_exits");
+  const [newPreferredEntryTag, setNewPreferredEntryTag] = useState<string>("");
+  const [newMaxNodes, setNewMaxNodes] = useState<number>(30);
+
+  const matchedEntryNodes = useMemo(() => {
+    const subNodes = directNodes.filter(
+      (n) => n.providerPrefix === newEntryPrefix
+    );
+    const trimmed = newEntryFilter.trim();
+    if (!trimmed || trimmed === "*" || trimmed === ".*") return subNodes;
+    try {
+      const rx = new RegExp(trimmed, "i");
+      return subNodes.filter((n) => rx.test(`${n.rawNodeName} ${n.tag}`));
+    } catch {
+      return subNodes.filter((n) =>
+        `${n.rawNodeName} ${n.tag}`
+          .toLowerCase()
+          .includes(trimmed.toLowerCase())
+      );
+    }
+  }, [directNodes, newEntryPrefix, newEntryFilter]);
 
   useEffect(() => {
     if (availablePrefixes.length > 0) {
@@ -48,19 +69,37 @@ export const ChainRuleBuilderPanel: React.FC = () => {
     }
   }, [availablePrefixes, newEntryPrefix, newMiddlePrefix, newExitPrefix]);
 
+  useEffect(() => {
+    if (
+      matchedEntryNodes.length > 0 &&
+      (!newPreferredEntryTag ||
+        !matchedEntryNodes.some((n) => n.tag === newPreferredEntryTag))
+    ) {
+      setNewPreferredEntryTag(matchedEntryNodes[0].tag);
+    }
+  }, [matchedEntryNodes, newPreferredEntryTag]);
+
   const handleAddRule = () => {
     if (!newEntryPrefix || !newExitPrefix) return;
     const isSelf = newHopCount === 1 && newEntryPrefix === newExitPrefix;
+    const modeTag =
+      newExpansionMode === "urltest_pool_to_exits"
+        ? "AutoPool"
+        : newExpansionMode === "urltest_pool_single_hop"
+        ? "SingleSlotPool"
+        : newExpansionMode === "full_cartesian"
+        ? "Matrix"
+        : "Static";
     const ruleTitle =
       newHopCount === 2
-        ? `2-Hop: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newMiddlePrefix} (${
+        ? `2-Hop [${modeTag}]: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newMiddlePrefix} (${
             newMiddleFilter || "*"
           }) -> ${newExitPrefix} (${newExitFilter || "*"})`
         : isSelf
-        ? `Self-Relay: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newExitPrefix} (${
+        ? `Self-Relay [${modeTag}]: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newExitPrefix} (${
             newExitFilter || "*"
           })`
-        : `1-Hop: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newExitPrefix} (${
+        : `1-Hop [${modeTag}]: ${newEntryPrefix} (${newEntryFilter || "*"}) -> ${newExitPrefix} (${
             newExitFilter || "*"
           })`;
 
@@ -77,6 +116,10 @@ export const ChainRuleBuilderPanel: React.FC = () => {
       exitNodeFilterRegex: newExitFilter.trim() || ".*",
       expansionMode: newExpansionMode,
       maxGeneratedNodes: newMaxNodes,
+      preferredPrimaryEntryTag:
+        newExpansionMode === "primary_entry_to_all_exits"
+          ? newPreferredEntryTag || undefined
+          : undefined,
     });
   };
 
@@ -87,7 +130,7 @@ export const ChainRuleBuilderPanel: React.FC = () => {
           Dynamic Chain Proxy Association Builder (Inter-Group &amp; Self-Relay)
         </span>
         <span className="primer-label primer-label-accent">
-          Sing-box 1.14.4 detour
+          Sing-box 1.14.4 detour + urltest Pool
         </span>
       </div>
       <div
@@ -169,13 +212,13 @@ export const ChainRuleBuilderPanel: React.FC = () => {
 
               <div>
                 <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-                  Entry Node Regex
+                  Entry Node Regex ({matchedEntryNodes.length} matched)
                 </label>
                 <input
                   className="primer-input"
                   value={newEntryFilter}
                   onChange={(e) => setNewEntryFilter(e.target.value)}
-                  placeholder=".* (or JP|日本)"
+                  placeholder=".* (or HK|JP|IPLC)"
                 />
               </div>
 
@@ -264,33 +307,59 @@ export const ChainRuleBuilderPanel: React.FC = () => {
               >
                 <select
                   className="primer-input"
-                  style={{ width: "auto", minWidth: 180, flex: "1 1 180px" }}
+                  style={{ width: "auto", minWidth: 230, flex: "1 1 230px" }}
                   value={newExpansionMode}
                   onChange={(e) =>
                     setNewExpansionMode(e.target.value as ChainExpansionMode)
                   }
                 >
+                  <option value="urltest_pool_to_exits">
+                    Dynamic Entry Pool (urltest Auto-Failover) -&gt; All Exits
+                    (Recommended: N slots)
+                  </option>
+                  <option value="urltest_pool_single_hop">
+                    Full Dynamic Dual Pool (Entry urltest -&gt; Exit urltest: 1
+                    Slot)
+                  </option>
                   <option value="primary_entry_to_all_exits">
-                    Primary Entry -&gt; All Matched Exits
+                    Pinned Primary Entry -&gt; All Matched Exits (Static 1×N)
                   </option>
                   <option value="round_robin_pairing">
-                    Round-Robin 1:1 Pairing
+                    Round-Robin 1:1 Pairing (Static max(M,N))
                   </option>
                   <option value="full_cartesian">
-                    Full Cartesian Matrix (M × N)
+                    Full Cartesian Matrix (Static M × N)
                   </option>
                 </select>
+
+                {newExpansionMode === "primary_entry_to_all_exits" &&
+                  matchedEntryNodes.length > 0 && (
+                    <select
+                      className="primer-input"
+                      style={{ width: "auto", minWidth: 160, flex: "1 1 160px" }}
+                      value={newPreferredEntryTag}
+                      onChange={(e) => setNewPreferredEntryTag(e.target.value)}
+                      title="Select which specific Entry node acts as the Pinned Primary Entry"
+                    >
+                      {matchedEntryNodes.map((n, idx) => (
+                        <option key={n.tag} value={n.tag}>
+                          {idx === 0 ? `[Default #1] ${n.rawNodeName}` : n.rawNodeName}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
                 <input
                   type="number"
                   className="primer-input"
-                  style={{ width: 85 }}
+                  style={{ width: 90 }}
                   min={1}
-                  max={200}
+                  max={2000}
                   value={newMaxNodes}
                   onChange={(e) =>
-                    setNewMaxNodes(Math.max(1, Number(e.target.value) || 20))
+                    setNewMaxNodes(Math.max(1, Number(e.target.value) || 30))
                   }
-                  title="Max SOCKS5 endpoints generated for this chain rule"
+                  title="Max SOCKS5 endpoints generated for this chain rule (up to 2000)"
                 />
               </div>
 

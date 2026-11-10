@@ -1,19 +1,114 @@
 import { defineConfig, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { execFile } from "node:child_process";
+import { ChildProcess, execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import * as net from "node:net";
-import { resolveSingboxBinaryPath } from "./viteServer/binaryResolver";
+import {
+  ensureExecutablePermissions,
+  getManagedBinaryPath,
+  getSingboxConfigPath,
+  getSurgeConfigPath,
+  inspectSingboxConfigContent,
+  resolveAppConfigDir,
+  resolveSingboxBinaryPath,
+} from "./viteServer/binaryResolver";
 import {
   checkTcpPortAvailability,
   runConnectivityProbe,
 } from "./viteServer/connectivityHandler";
 
 const execFileAsync = promisify(execFile);
+
+interface ManagedViteSingboxProcess {
+  child: ChildProcess;
+  pid: number;
+  binaryPath: string;
+  configPath: string;
+  listenAddress: string;
+  logs: string[];
+}
+
+let activeSingboxProcess: ManagedViteSingboxProcess | null = null;
+
+function stopActiveSingboxProcess(): { stoppedPid: number | null; lastAddr: string } {
+  if (!activeSingboxProcess) {
+    return { stoppedPid: null, lastAddr: "127.0.0.1:11400" };
+  }
+  const pid = activeSingboxProcess.pid;
+  const addr = activeSingboxProcess.listenAddress;
+  try {
+    activeSingboxProcess.child.kill("SIGTERM");
+  } catch {}
+  activeSingboxProcess = null;
+  return { stoppedPid: pid, lastAddr: addr };
+}
+
+async function spawnSingboxProcessNode(
+  binaryPath: string,
+  configDir: string,
+  singboxCfgPath: string,
+  listenAddress: string
+): Promise<{ pid: number; logs: string[] }> {
+  stopActiveSingboxProcess();
+  await new Promise((r) => setTimeout(r, 120));
+
+  const logs: string[] = [];
+  const child = spawn(binaryPath, ["run", "-c", singboxCfgPath], {
+    cwd: configDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  const appendLines = (chunk: Buffer) => {
+    const lines = chunk.toString("utf-8").split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+      if (logs.length >= 250) logs.shift();
+      logs.push(line);
+    }
+  };
+
+  child.stdout?.on("data", appendLines);
+  child.stderr?.on("data", appendLines);
+
+  let exitedCode: number | null = null;
+  let spawnErr: Error | null = null;
+  child.once("exit", (code) => {
+    exitedCode = code ?? 1;
+    if (activeSingboxProcess?.child === child) {
+      activeSingboxProcess = null;
+    }
+  });
+  child.once("error", (err) => {
+    spawnErr = err;
+  });
+
+  await new Promise((r) => setTimeout(r, 320));
+
+  if (spawnErr) {
+    throw new Error(`Failed to spawn sing-box: ${(spawnErr as Error).message}`);
+  }
+  if (exitedCode !== null) {
+    throw new Error(
+      `sing-box exited immediately (code ${exitedCode}): ${
+        logs.join("\n") || "Check port conflict or outbound parameters"
+      }`
+    );
+  }
+
+  const pid = child.pid || 0;
+  activeSingboxProcess = {
+    child,
+    pid,
+    binaryPath,
+    configPath: singboxCfgPath,
+    listenAddress,
+    logs,
+  };
+  return { pid, logs: [...logs] };
+}
 
 function readJsonBody(req: any): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -114,27 +209,39 @@ function singboxDevApiPlugin(): Plugin {
           }
 
           if (route === "/__singbox_api/singbox-check" && req.method === "POST") {
-            const { configContent } = await readJsonBody(req);
+            const { configContent, surgeContent } = await readJsonBody(req);
+            const configDir = resolveAppConfigDir();
+            const singboxCfgPath = getSingboxConfigPath();
+            const surgeCfgPath = getSurgeConfigPath();
+
+            fs.writeFileSync(singboxCfgPath, String(configContent || ""), "utf-8");
+            if (typeof surgeContent === "string") {
+              fs.writeFileSync(surgeCfgPath, surgeContent, "utf-8");
+            }
+
+            const summary = inspectSingboxConfigContent(String(configContent || ""));
             const resolved = await resolveSingboxBinaryPath(projectRoot);
             if (!resolved.found) {
               return sendJson(res, 200, {
                 valid: false,
                 binary_found: false,
                 binary_path: resolved.binaryPath,
+                config_dir: configDir,
+                singbox_config_path: singboxCfgPath,
+                surge_config_path: surgeCfgPath,
+                summary,
+                service_reloaded: false,
                 searched_paths: resolved.searchedPaths.slice(0, 6),
                 version: "sing-box 1.14.4",
-                output: `BINARY_NOT_FOUND: sing-box binary not found at ${resolved.binaryPath}. Place your local sing-box binary in ./bin/sing-box or ./src-tauri/binaries/sing-box`,
+                output: `BINARY_NOT_FOUND: Synced config.json (${summary.proxy_outbound_count} proxy outbounds, ${summary.socks_user_count} SOCKS5 users) to ${singboxCfgPath}, but sing-box binary is not imported yet.`,
               });
             }
 
-            const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-            const cfgFile = path.join(os.tmpdir(), `sb_check_${id}.json`);
             try {
-              fs.writeFileSync(cfgFile, String(configContent || ""), "utf-8");
               const { stdout, stderr } = await execFileAsync(resolved.binaryPath, [
                 "check",
                 "-c",
-                cfgFile,
+                singboxCfgPath,
               ]);
               const verOut = await execFileAsync(resolved.binaryPath, ["version"]).catch(
                 () => ({ stdout: "sing-box 1.14.4" })
@@ -142,14 +249,39 @@ function singboxDevApiPlugin(): Plugin {
               const firstLine =
                 verOut.stdout.split(/\r?\n/).find((l) => l.trim().length > 0) ||
                 "sing-box 1.14.4";
+
+              let serviceReloaded = false;
+              if (activeSingboxProcess && !summary.empty_workspace) {
+                try {
+                  await spawnSingboxProcessNode(
+                    resolved.binaryPath,
+                    configDir,
+                    singboxCfgPath,
+                    summary.listen_address
+                  );
+                  serviceReloaded = true;
+                } catch {}
+              }
+
+              const combined = (stdout + "\n" + stderr).trim();
+              const formattedOutput = summary.empty_workspace
+                ? `EMPTY_WORKSPACE: ${singboxCfgPath} syntax check passed (0 errors), but it currently contains 0 proxy nodes (only 'direct' outbound, 0 SOCKS5 users). Import or enable a subscription to populate nodes.`
+                : combined ||
+                  `sing-box check -c ${singboxCfgPath} passed (0 errors) — Active contents: ${summary.proxy_outbound_count} proxy outbounds (${summary.socks_user_count} SOCKS5 users on ${summary.listen_address}, ${summary.urltest_pool_count} dynamic pools, ${summary.dns_server_count} DNS servers, ${summary.file_size_bytes} bytes)${
+                    serviceReloaded ? " [Hot-reloaded running sing-box service]" : ""
+                  }.`;
+
               return sendJson(res, 200, {
                 valid: true,
                 binary_found: true,
                 binary_path: resolved.binaryPath,
+                config_dir: configDir,
+                singbox_config_path: singboxCfgPath,
+                surge_config_path: surgeCfgPath,
+                summary,
+                service_reloaded: serviceReloaded,
                 version: firstLine,
-                output:
-                  (stdout + "\n" + stderr).trim() ||
-                  `sing-box check -c config.json passed with 0 errors (${resolved.binaryPath}).`,
+                output: formattedOutput,
               });
             } catch (err: any) {
               const errMsg = [err?.stdout, err?.stderr, err?.message]
@@ -160,13 +292,14 @@ function singboxDevApiPlugin(): Plugin {
                 valid: false,
                 binary_found: true,
                 binary_path: resolved.binaryPath,
+                config_dir: configDir,
+                singbox_config_path: singboxCfgPath,
+                surge_config_path: surgeCfgPath,
+                summary,
+                service_reloaded: false,
                 version: "sing-box 1.14.4",
                 output: errMsg || "sing-box check failed",
               });
-            } finally {
-              try {
-                if (fs.existsSync(cfgFile)) fs.unlinkSync(cfgFile);
-              } catch {}
             }
           }
 
@@ -177,6 +310,10 @@ function singboxDevApiPlugin(): Plugin {
                 imported: false,
                 binary_name: "sing-box",
                 binary_path: resolved.binaryPath,
+                managed_binary_path: resolved.managedBinaryPath,
+                config_dir: resolved.configDir,
+                singbox_config_path: resolved.singboxConfigPath,
+                surge_config_path: resolved.surgeConfigPath,
                 file_size: 0,
                 version: null,
                 searched_paths: resolved.searchedPaths.slice(0, 6),
@@ -194,6 +331,10 @@ function singboxDevApiPlugin(): Plugin {
                 imported: true,
                 binary_name: "sing-box",
                 binary_path: resolved.binaryPath,
+                managed_binary_path: resolved.managedBinaryPath,
+                config_dir: resolved.configDir,
+                singbox_config_path: resolved.singboxConfigPath,
+                surge_config_path: resolved.surgeConfigPath,
                 file_size: stat ? stat.size : 0,
                 version: firstLine.replace("sing-box version ", "").trim(),
                 searched_paths: resolved.searchedPaths.slice(0, 6),
@@ -203,11 +344,177 @@ function singboxDevApiPlugin(): Plugin {
                 imported: false,
                 binary_name: "sing-box",
                 binary_path: resolved.binaryPath,
+                managed_binary_path: resolved.managedBinaryPath,
+                config_dir: resolved.configDir,
+                singbox_config_path: resolved.singboxConfigPath,
+                surge_config_path: resolved.surgeConfigPath,
                 file_size: 0,
                 version: null,
                 searched_paths: resolved.searchedPaths.slice(0, 6),
               });
             }
+          }
+
+          if (route === "/__singbox_api/import-binary" && req.method === "POST") {
+            const { sourcePath, base64Data } = await readJsonBody(req);
+            const managedBin = getManagedBinaryPath();
+            if (sourcePath && String(sourcePath).trim()) {
+              const src = String(sourcePath).trim();
+              if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
+                return sendJson(res, 400, {
+                  error: `Selected file does not exist: ${src}`,
+                });
+              }
+              if (src !== managedBin) {
+                fs.copyFileSync(src, managedBin);
+              }
+            } else if (base64Data && String(base64Data).trim()) {
+              const buf = Buffer.from(String(base64Data).trim(), "base64");
+              if (buf.length < 1024) {
+                return sendJson(res, 400, {
+                  error: "Uploaded file is too small to be a valid sing-box binary.",
+                });
+              }
+              fs.writeFileSync(managedBin, buf);
+            } else {
+              return sendJson(res, 400, {
+                error: "Provide either sourcePath or base64Data.",
+              });
+            }
+
+            ensureExecutablePermissions(managedBin);
+            const { stdout } = await execFileAsync(managedBin, ["version"]);
+            const firstLine =
+              stdout.split(/\r?\n/).find((l) => l.trim().length > 0) ||
+              "sing-box version 1.14.4";
+            const stat = fs.statSync(managedBin);
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            return sendJson(res, 200, {
+              imported: true,
+              binary_name: "sing-box",
+              binary_path: managedBin,
+              managed_binary_path: managedBin,
+              config_dir: resolved.configDir,
+              singbox_config_path: resolved.singboxConfigPath,
+              surge_config_path: resolved.surgeConfigPath,
+              file_size: stat.size,
+              version: firstLine.replace("sing-box version ", "").trim(),
+              searched_paths: resolved.searchedPaths.slice(0, 6),
+            });
+          }
+
+          if (route === "/__singbox_api/open-config-folder" && req.method === "POST") {
+            const configDir = resolveAppConfigDir();
+            const singboxCfgPath = getSingboxConfigPath();
+            const content = fs.existsSync(singboxCfgPath)
+              ? fs.readFileSync(singboxCfgPath, "utf-8")
+              : "";
+            const opener =
+              process.platform === "darwin"
+                ? "open"
+                : process.platform === "win32"
+                ? "explorer"
+                : "xdg-open";
+            try {
+              const child = spawn(opener, [configDir], {
+                detached: true,
+                stdio: "ignore",
+              });
+              child.unref();
+            } catch {}
+            return sendJson(res, 200, inspectSingboxConfigContent(content));
+          }
+
+          if (route === "/__singbox_api/service-start" && req.method === "POST") {
+            const { configContent, surgeContent } = await readJsonBody(req);
+            const configDir = resolveAppConfigDir();
+            const singboxCfgPath = getSingboxConfigPath();
+            const surgeCfgPath = getSurgeConfigPath();
+
+            fs.writeFileSync(singboxCfgPath, String(configContent || ""), "utf-8");
+            if (typeof surgeContent === "string") {
+              fs.writeFileSync(surgeCfgPath, surgeContent, "utf-8");
+            }
+
+            const summary = inspectSingboxConfigContent(String(configContent || ""));
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            if (!resolved.found) {
+              return sendJson(res, 400, {
+                error: `sing-box binary not found at ${resolved.binaryPath}. Import the sing-box binary first.`,
+              });
+            }
+
+            await execFileAsync(resolved.binaryPath, ["check", "-c", singboxCfgPath]);
+            const { pid, logs } = await spawnSingboxProcessNode(
+              resolved.binaryPath,
+              configDir,
+              singboxCfgPath,
+              summary.listen_address
+            );
+            return sendJson(res, 200, {
+              running: true,
+              pid,
+              binary_path: resolved.binaryPath,
+              config_path: singboxCfgPath,
+              surge_config_path: surgeCfgPath,
+              config_dir: configDir,
+              listen_address: summary.listen_address,
+              message: `Started sing-box (PID ${pid}) with -c ${singboxCfgPath} on ${summary.listen_address} (${summary.proxy_outbound_count} proxy outbounds, ${summary.socks_user_count} SOCKS5 users).`,
+              recent_logs: logs,
+            });
+          }
+
+          if (route === "/__singbox_api/service-stop" && req.method === "POST") {
+            const configDir = resolveAppConfigDir();
+            const singboxCfgPath = getSingboxConfigPath();
+            const surgeCfgPath = getSurgeConfigPath();
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            const { stoppedPid, lastAddr } = stopActiveSingboxProcess();
+            return sendJson(res, 200, {
+              running: false,
+              pid: null,
+              binary_path: resolved.binaryPath,
+              config_path: singboxCfgPath,
+              surge_config_path: surgeCfgPath,
+              config_dir: configDir,
+              listen_address: lastAddr,
+              message: stoppedPid
+                ? `Stopped sing-box service (PID ${stoppedPid}) on ${lastAddr}.`
+                : "Sing-box service is already stopped.",
+              recent_logs: [],
+            });
+          }
+
+          if (route === "/__singbox_api/service-status" && req.method === "GET") {
+            const configDir = resolveAppConfigDir();
+            const singboxCfgPath = getSingboxConfigPath();
+            const surgeCfgPath = getSurgeConfigPath();
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            if (activeSingboxProcess && activeSingboxProcess.child.exitCode === null) {
+              return sendJson(res, 200, {
+                running: true,
+                pid: activeSingboxProcess.pid,
+                binary_path: activeSingboxProcess.binaryPath,
+                config_path: activeSingboxProcess.configPath,
+                surge_config_path: surgeCfgPath,
+                config_dir: configDir,
+                listen_address: activeSingboxProcess.listenAddress,
+                message: `sing-box (PID ${activeSingboxProcess.pid}) running on ${activeSingboxProcess.listenAddress} (-c ${activeSingboxProcess.configPath})`,
+                recent_logs: [...activeSingboxProcess.logs],
+              });
+            }
+            activeSingboxProcess = null;
+            return sendJson(res, 200, {
+              running: false,
+              pid: null,
+              binary_path: resolved.binaryPath,
+              config_path: singboxCfgPath,
+              surge_config_path: surgeCfgPath,
+              config_dir: configDir,
+              listen_address: "127.0.0.1:11400",
+              message: "sing-box service is stopped.",
+              recent_logs: [],
+            });
           }
 
           if (route === "/__singbox_api/check-port" && req.method === "POST") {

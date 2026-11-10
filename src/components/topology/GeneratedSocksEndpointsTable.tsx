@@ -1,5 +1,6 @@
 import React from "react";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { MAX_SOCKS5_ENDPOINTS } from "../../utils/chainProxyEngine";
 
 export const GeneratedSocksEndpointsTable: React.FC = () => {
   const endpoints = useWorkspaceStore((s) => s.endpoints);
@@ -11,7 +12,8 @@ export const GeneratedSocksEndpointsTable: React.FC = () => {
       <div className="primer-datatable-header-bar">
         <div className="primer-datatable-title">
           <span>
-            Generated SOCKS5 Bridge Endpoints ({endpoints.length} / 1000 slots)
+            Generated SOCKS5 Bridge Endpoints ({endpoints.length} /{" "}
+            {MAX_SOCKS5_ENDPOINTS} slots)
           </span>
         </div>
         <div className="primer-datatable-actions">

@@ -1,13 +1,20 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  FolderOpen,
   Play,
   Radio,
   Settings,
   Square,
 } from "lucide-react";
-import { checkBridgePortAvailability } from "../../services/tauriGateway";
+import {
+  checkBridgePortAvailability,
+  getSingboxServiceStatus,
+  openAppConfigFolder,
+  startSingboxService,
+  stopSingboxService,
+} from "../../services/tauriGateway";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { PortAvailabilityResult } from "../../types/singbox";
 
@@ -26,14 +33,58 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
   const [ipInput, setIpInput] = useState(listenIp);
   const [portInput, setPortInput] = useState(String(listenPort));
   const [isCheckingPort, setIsCheckingPort] = useState(false);
+  const [activePid, setActivePid] = useState<number | null>(null);
+  const [activeConfigPath, setActiveConfigPath] = useState<string>("");
   const [portCheckStatus, setPortCheckStatus] =
     useState<PortAvailabilityResult | null>(null);
+  const seenLogLinesRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setIpInput(listenIp);
+    setPortInput(String(listenPort));
+  }, [listenIp, listenPort]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncStatus = async () => {
+      try {
+        const st = await getSingboxServiceStatus();
+        if (cancelled) return;
+        setActivePid(st.pid);
+        if (st.config_path) setActiveConfigPath(st.config_path);
+        setRunningMode(st.running ? "normal" : "stopped");
+        for (const line of st.recent_logs || []) {
+          if (!seenLogLinesRef.current.has(line)) {
+            seenLogLinesRef.current.add(line);
+            appendLog(`[INFO][sing-box] ${line}`);
+          }
+        }
+      } catch {}
+    };
+    syncStatus();
+    const timer = setInterval(syncStatus, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [appendLog, setRunningMode]);
 
   const handleApplyAndVerifyPort = async () => {
     const parsedPort = Number(portInput) || 11400;
     const cleanIp = ipInput.trim() || "127.0.0.1";
     setIsCheckingPort(true);
     try {
+      // If our own managed service is running and we are changing ports, stop it first or hot-reload via setNetworkParams
+      if (runningMode !== "stopped" && parsedPort === listenPort && cleanIp === listenIp) {
+        setPortCheckStatus({
+          port: parsedPort,
+          host: cleanIp,
+          occupied: false,
+          available: true,
+          message: `Managed sing-box service (PID ${activePid || "active"}) is currently listening on ${cleanIp}:${parsedPort}.`,
+        });
+        return;
+      }
       const checkRes = await checkBridgePortAvailability(cleanIp, parsedPort);
       setPortCheckStatus(checkRes);
       if (checkRes.occupied) {
@@ -44,7 +95,7 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
           listenPort: parsedPort,
         });
         appendLog(
-          `[INFO][BridgePort] Applied SOCKS5 Bridge endpoint ${cleanIp}:${parsedPort} (${checkRes.message})`
+          `[INFO][BridgePort] Applied & synced SOCKS5 Bridge endpoint ${cleanIp}:${parsedPort} to config.json and aSingbox127.conf (${checkRes.message})`
         );
       }
     } finally {
@@ -60,38 +111,52 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
       listenPort: parsedPort,
     });
     appendLog(
-      `[WARN][BridgePort] Updated exported SOCKS5 Bridge port to ${cleanIp}:${parsedPort}. Remember to re-export config.json and aSingbox127.conf.`
+      `[WARN][BridgePort] Updated & synced SOCKS5 Bridge port to ${cleanIp}:${parsedPort} in Application Support config.json and aSingbox127.conf.`
     );
   };
 
   const handleToggleService = async () => {
-    if (runningMode !== "stopped") {
-      setRunningMode("stopped");
-      appendLog(
-        `[INFO][Service] Sing-box 1.14.4 Bridge service stopped on ${listenIp}:${listenPort}.`
-      );
-      return;
-    }
-
-    const parsedPort = Number(portInput) || listenPort || 11400;
-    const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
     setIsCheckingPort(true);
     try {
-      const checkRes = await checkBridgePortAvailability(cleanIp, parsedPort);
-      setPortCheckStatus(checkRes);
-      if (checkRes.occupied) {
-        appendLog(
-          `[ERROR][Service] Cannot start Bridge service on ${cleanIp}:${parsedPort} — port is already occupied! Exported aSingbox127.conf requires exact port alignment.`
-        );
+      if (runningMode !== "stopped") {
+        const res = await stopSingboxService();
+        setActivePid(null);
+        setRunningMode("stopped");
+        seenLogLinesRef.current.clear();
+        appendLog(`[INFO][Service] ${res.message}`);
         return;
       }
-      setNetworkParams({
-        listenIp: cleanIp,
-        listenPort: parsedPort,
-      });
-      setRunningMode("normal");
+
+      const parsedPort = Number(portInput) || listenPort || 11400;
+      const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
+
+      if (parsedPort !== listenPort || cleanIp !== listenIp) {
+        setNetworkParams({
+          listenIp: cleanIp,
+          listenPort: parsedPort,
+        });
+      }
+
+      const stateNow = useWorkspaceStore.getState();
+      const jsonText = JSON.stringify(stateNow.singboxConfig, null, 2);
+      const surgeText = stateNow.surgeConfigText;
+
+      const startRes = await startSingboxService(jsonText, surgeText);
+      setActivePid(startRes.pid);
+      setActiveConfigPath(startRes.config_path);
+      setRunningMode(startRes.running ? "normal" : "stopped");
+      appendLog(`[INFO][Service] ${startRes.message}`);
+      for (const line of startRes.recent_logs || []) {
+        seenLogLinesRef.current.add(line);
+        appendLog(`[INFO][sing-box] ${line}`);
+      }
+    } catch (err: any) {
+      setRunningMode("stopped");
+      setActivePid(null);
       appendLog(
-        `[INFO][Service] Started Sing-box 1.14.4 Bridge service on ${cleanIp}:${parsedPort} (auto_detect_interface=${autoDetectInterface}).`
+        `[ERROR][Service] Failed to start sing-box service: ${
+          err?.message || String(err)
+        }`
       );
     } finally {
       setIsCheckingPort(false);
@@ -115,31 +180,52 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
             size={16}
             style={{ color: "var(--accent-fg)", flexShrink: 0 }}
           />
-          <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>
-            Local SOCKS5 Bridge Port &amp; Service Control
-          </span>
+          <div>
+            <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>
+              Local SOCKS5 Bridge Port &amp; Live Sing-box Process Control
+            </span>
+            {activePid && (
+              <span
+                className="badge badge-success"
+                style={{ marginLeft: 8, fontSize: 10.5 }}
+              >
+                PID {activePid} Active
+              </span>
+            )}
+          </div>
         </div>
 
-        <button
-          type="button"
-          className={`btn btn-sm ${
-            runningMode !== "stopped" ? "btn-danger" : "btn-primary"
-          }`}
-          onClick={handleToggleService}
-          disabled={isCheckingPort}
-        >
-          {runningMode !== "stopped" ? (
-            <>
-              <Square size={13} />
-              <span>Stop Service ({listenPort})</span>
-            </>
-          ) : (
-            <>
-              <Play size={13} />
-              <span>Start Service</span>
-            </>
-          )}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => openAppConfigFolder().catch(() => {})}
+            title={activeConfigPath || "Open Application Support folder"}
+          >
+            <FolderOpen size={13} />
+            Open Folder
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${
+              runningMode !== "stopped" ? "btn-danger" : "btn-primary"
+            }`}
+            onClick={handleToggleService}
+            disabled={isCheckingPort}
+          >
+            {runningMode !== "stopped" ? (
+              <>
+                <Square size={13} />
+                <span>Stop Service ({listenPort})</span>
+              </>
+            ) : (
+              <>
+                <Play size={13} />
+                <span>Start Service ({portInput})</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       <div

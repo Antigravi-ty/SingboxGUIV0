@@ -37,6 +37,7 @@ pub fn run() {
                         }
                     }
                     "quit_app" => {
+                        commands::singbox::stop_managed_singbox_process();
                         app_handle.exit(0);
                     }
                     _ => {}
@@ -69,7 +70,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::subscription::fetch_subscription_url,
             commands::singbox::check_binary_status,
+            commands::singbox::import_singbox_binary_cmd,
+            commands::singbox::open_config_folder_cmd,
             commands::singbox::validate_singbox_config_cmd,
+            commands::singbox::start_singbox_service_cmd,
+            commands::singbox::stop_singbox_service_cmd,
+            commands::singbox::get_singbox_service_status_cmd,
             commands::mitm::sniff_mitm_port,
             commands::mitm::toggle_mitm_listener,
             commands::mitm::check_port_availability,

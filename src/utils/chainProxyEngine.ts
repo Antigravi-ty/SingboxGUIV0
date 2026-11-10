@@ -16,8 +16,10 @@ import {
   SingboxRouteRule,
 } from "../types/singbox";
 
-function safeRegexMatch(pattern: string, target: string): boolean {
-  const trimmed = pattern.trim();
+export const MAX_SOCKS5_ENDPOINTS = 5000;
+
+function safeRegexMatch(pattern: string | undefined, target: string): boolean {
+  const trimmed = (pattern || "").trim();
   if (!trimmed || trimmed === "*" || trimmed === ".*") {
     return true;
   }
@@ -38,6 +40,17 @@ function cloneOutboundWithDetour(
   cloned.tag = newTag;
   cloned.detour = detourTag;
   return cloned;
+}
+
+function buildUrltestOutbound(tag: string, memberTags: string[]): SingboxOutbound {
+  return {
+    type: "urltest",
+    tag,
+    outbounds: memberTags,
+    url: "https://www.gstatic.com/generate_204",
+    interval: "3m",
+    tolerance: 50,
+  };
 }
 
 export function buildSingboxAndSurgePipeline(params: {
@@ -89,7 +102,7 @@ export function buildSingboxAndSurgePipeline(params: {
     idx < 1000 ? String(idx).padStart(3, "0") : String(idx);
 
   for (const node of directNodes) {
-    if (counter >= 999) break;
+    if (counter >= MAX_SOCKS5_ENDPOINTS) break;
     const username = formatUsername(counter);
     const password = "0";
     counter++;
@@ -115,6 +128,17 @@ export function buildSingboxAndSurgePipeline(params: {
   }
 
   const visualEdges: TopologyVisualEdge[] = [];
+
+  const registerUniqueTag = (base: string): string => {
+    let tag = base;
+    let dup = 1;
+    while (usedTags.has(tag)) {
+      tag = `${base}_${dup}`;
+      dup++;
+    }
+    usedTags.add(tag);
+    return tag;
+  };
 
   for (const rule of chainRules) {
     const entryCandidates = (byPrefix.get(rule.entryPrefix) || []).filter((n) =>
@@ -150,115 +174,278 @@ export function buildSingboxAndSurgePipeline(params: {
       const maxForRule = Math.max(1, rule.maxGeneratedNodes || 25);
 
       if (rule.hopCount === 1) {
-        const pairs: Array<{
-          entry: ConvertedNodeMetadata;
-          exit: ConvertedNodeMetadata;
-        }> = [];
-
-        if (rule.expansionMode === "primary_entry_to_all_exits") {
-          const primaryEntry = entryCandidates[0];
-          for (const exitNode of exitCandidates) {
-            if (primaryEntry.tag === exitNode.tag) continue;
-            pairs.push({ entry: primaryEntry, exit: exitNode });
+        if (
+          rule.expansionMode === "urltest_pool_to_exits" ||
+          rule.expansionMode === "urltest_pool_single_hop"
+        ) {
+          // Dynamic Entry Pool via Sing-box 1.14.4 `urltest` outbound
+          const sharedEntryPoolTag = registerUniqueTag(
+            `_POOL_ENTRY_${rule.entryPrefix}_${rule.id.slice(-6)}`
+          );
+          if (entryCandidates.length > 1) {
+            allOutbounds.push(
+              buildUrltestOutbound(
+                sharedEntryPoolTag,
+                entryCandidates.map((c) => c.tag)
+              )
+            );
           }
-        } else if (rule.expansionMode === "round_robin_pairing") {
-          const len = Math.max(entryCandidates.length, exitCandidates.length);
-          for (let i = 0; i < len; i++) {
-            const entryNode = entryCandidates[i % entryCandidates.length];
-            const exitNode = exitCandidates[i % exitCandidates.length];
-            if (entryNode.tag === exitNode.tag) continue;
-            pairs.push({ entry: entryNode, exit: exitNode });
+
+          const chainedExitTagsForSinglePool: string[] = [];
+
+          for (const exitNode of exitCandidates.slice(0, maxForRule)) {
+            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
+
+            // Prevent self-loop when entry and exit are in the same subscription
+            const validEntries = entryCandidates.filter(
+              (e) => e.tag !== exitNode.tag
+            );
+            if (validEntries.length === 0) continue;
+
+            let detourTargetTag: string;
+            if (validEntries.length === 1) {
+              detourTargetTag = validEntries[0].tag;
+            } else if (validEntries.length === entryCandidates.length) {
+              detourTargetTag = sharedEntryPoolTag;
+            } else {
+              const filteredPoolTag = registerUniqueTag(
+                `_POOL_ENTRY_${rule.entryPrefix}_EX_${exitNode.rawNodeName.replace(/\s+/g, "_")}`
+              );
+              allOutbounds.push(
+                buildUrltestOutbound(
+                  filteredPoolTag,
+                  validEntries.map((c) => c.tag)
+                )
+              );
+              detourTargetTag = filteredPoolTag;
+            }
+
+            const entryLabel =
+              validEntries.length > 1
+                ? `AutoPool(${validEntries.length})`
+                : validEntries[0].rawNodeName;
+
+            const baseChainTag = formatChainNodeTag({
+              scheme: namingScheme,
+              hopCount: 1,
+              entryPrefix: rule.entryPrefix,
+              exitPrefix: rule.exitPrefix,
+              exitRawName: exitNode.rawNodeName,
+              entryRawName: entryLabel,
+            });
+
+            if (rule.expansionMode === "urltest_pool_single_hop") {
+              const internalExitTag = registerUniqueTag(`_HOP_${baseChainTag}`);
+              const chainedOutbound = cloneOutboundWithDetour(
+                exitNode.outbound,
+                internalExitTag,
+                detourTargetTag
+              );
+              allOutbounds.push(chainedOutbound);
+              chainedExitTagsForSinglePool.push(internalExitTag);
+            } else {
+              const chainTag = registerUniqueTag(baseChainTag);
+              const chainedOutbound = cloneOutboundWithDetour(
+                exitNode.outbound,
+                chainTag,
+                detourTargetTag
+              );
+              allOutbounds.push(chainedOutbound);
+
+              const username = formatUsername(counter);
+              const password = "0";
+              counter++;
+              ruleGeneratedCount++;
+              if (sampleGeneratedTags.length < 4) {
+                sampleGeneratedTags.push(chainTag);
+              }
+
+              endpoints.push({
+                index: counter - 1,
+                username,
+                password,
+                finalTag: chainTag,
+                surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
+                hopCount: 1,
+                isSelfHop,
+                entryPrefix: rule.entryPrefix,
+                exitPrefix: rule.exitPrefix,
+                hopTags: [
+                  validEntries.length > 1
+                    ? `${detourTargetTag}[${validEntries.length} nodes]`
+                    : validEntries[0].tag,
+                  exitNode.tag,
+                ],
+                protocolChain: ["urltest-pool", exitNode.protocol],
+                ruleId: rule.id,
+                outbound: chainedOutbound,
+              });
+            }
+          }
+
+          if (
+            rule.expansionMode === "urltest_pool_single_hop" &&
+            chainedExitTagsForSinglePool.length > 0 &&
+            counter < MAX_SOCKS5_ENDPOINTS
+          ) {
+            const singlePoolTag = registerUniqueTag(
+              formatChainNodeTag({
+                scheme: namingScheme,
+                hopCount: 1,
+                entryPrefix: rule.entryPrefix,
+                exitPrefix: rule.exitPrefix,
+                exitRawName: `AutoExitPool(${chainedExitTagsForSinglePool.length})`,
+                entryRawName: `AutoEntryPool(${entryCandidates.length})`,
+              })
+            );
+            const topPoolOutbound = buildUrltestOutbound(
+              singlePoolTag,
+              chainedExitTagsForSinglePool
+            );
+            allOutbounds.push(topPoolOutbound);
+
+            const username = formatUsername(counter);
+            const password = "0";
+            counter++;
+            ruleGeneratedCount++;
+            sampleGeneratedTags.push(singlePoolTag);
+
+            endpoints.push({
+              index: counter - 1,
+              username,
+              password,
+              finalTag: singlePoolTag,
+              surgeProxyLine: `${singlePoolTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
+              hopCount: 1,
+              isSelfHop,
+              entryPrefix: rule.entryPrefix,
+              exitPrefix: rule.exitPrefix,
+              hopTags: [
+                `${sharedEntryPoolTag}[${entryCandidates.length}]`,
+                `${singlePoolTag}[${chainedExitTagsForSinglePool.length}]`,
+              ],
+              protocolChain: ["urltest-entry", "urltest-exit"],
+              ruleId: rule.id,
+              outbound: topPoolOutbound,
+            });
           }
         } else {
-          for (const entryNode of entryCandidates) {
+          // Static Pairing Modes: primary_entry_to_all_exits, round_robin_pairing, full_cartesian
+          const pairs: Array<{
+            entry: ConvertedNodeMetadata;
+            exit: ConvertedNodeMetadata;
+          }> = [];
+
+          if (rule.expansionMode === "primary_entry_to_all_exits") {
+            const primaryEntry =
+              entryCandidates.find(
+                (c) => c.tag === rule.preferredPrimaryEntryTag
+              ) || entryCandidates[0];
             for (const exitNode of exitCandidates) {
+              if (primaryEntry.tag === exitNode.tag) continue;
+              pairs.push({ entry: primaryEntry, exit: exitNode });
+            }
+          } else if (rule.expansionMode === "round_robin_pairing") {
+            const len = Math.max(entryCandidates.length, exitCandidates.length);
+            for (let i = 0; i < len; i++) {
+              const entryNode = entryCandidates[i % entryCandidates.length];
+              const exitNode = exitCandidates[i % exitCandidates.length];
               if (entryNode.tag === exitNode.tag) continue;
               pairs.push({ entry: entryNode, exit: exitNode });
             }
-          }
-        }
-
-        for (const pair of pairs.slice(0, maxForRule)) {
-          if (counter >= 999) break;
-          const baseChainTag = formatChainNodeTag({
-            scheme: namingScheme,
-            hopCount: 1,
-            entryPrefix: rule.entryPrefix,
-            exitPrefix: rule.exitPrefix,
-            exitRawName: pair.exit.rawNodeName,
-            entryRawName: pair.entry.rawNodeName,
-          });
-          let chainTag = baseChainTag;
-          let dup = 1;
-          while (usedTags.has(chainTag)) {
-            chainTag = `${baseChainTag}_${dup}`;
-            dup++;
-          }
-          usedTags.add(chainTag);
-
-          const chainedOutbound = cloneOutboundWithDetour(
-            pair.exit.outbound,
-            chainTag,
-            pair.entry.tag
-          );
-          allOutbounds.push(chainedOutbound);
-
-          const username = formatUsername(counter);
-          const password = "0";
-          counter++;
-          ruleGeneratedCount++;
-          if (sampleGeneratedTags.length < 4) {
-            sampleGeneratedTags.push(chainTag);
+          } else {
+            for (const entryNode of entryCandidates) {
+              for (const exitNode of exitCandidates) {
+                if (entryNode.tag === exitNode.tag) continue;
+                pairs.push({ entry: entryNode, exit: exitNode });
+              }
+            }
           }
 
-          endpoints.push({
-            index: counter - 1,
-            username,
-            password,
-            finalTag: chainTag,
-            surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
-            hopCount: 1,
-            isSelfHop,
-            entryPrefix: rule.entryPrefix,
-            exitPrefix: rule.exitPrefix,
-            hopTags: [pair.entry.tag, pair.exit.tag],
-            protocolChain: [pair.entry.protocol, pair.exit.protocol],
-            ruleId: rule.id,
-            outbound: chainedOutbound,
-          });
+          for (const pair of pairs.slice(0, maxForRule)) {
+            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
+            const baseChainTag = formatChainNodeTag({
+              scheme: namingScheme,
+              hopCount: 1,
+              entryPrefix: rule.entryPrefix,
+              exitPrefix: rule.exitPrefix,
+              exitRawName: pair.exit.rawNodeName,
+              entryRawName: pair.entry.rawNodeName,
+            });
+            const chainTag = registerUniqueTag(baseChainTag);
+
+            const chainedOutbound = cloneOutboundWithDetour(
+              pair.exit.outbound,
+              chainTag,
+              pair.entry.tag
+            );
+            allOutbounds.push(chainedOutbound);
+
+            const username = formatUsername(counter);
+            const password = "0";
+            counter++;
+            ruleGeneratedCount++;
+            if (sampleGeneratedTags.length < 4) {
+              sampleGeneratedTags.push(chainTag);
+            }
+
+            endpoints.push({
+              index: counter - 1,
+              username,
+              password,
+              finalTag: chainTag,
+              surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
+              hopCount: 1,
+              isSelfHop,
+              entryPrefix: rule.entryPrefix,
+              exitPrefix: rule.exitPrefix,
+              hopTags: [pair.entry.tag, pair.exit.tag],
+              protocolChain: [pair.entry.protocol, pair.exit.protocol],
+              ruleId: rule.id,
+              outbound: chainedOutbound,
+            });
+          }
         }
       } else if (rule.hopCount === 2 && rule.middlePrefix) {
-        const primaryEntry = entryCandidates[0];
-        const primaryMiddle = middleCandidates[0];
-
         if (
-          primaryEntry &&
-          primaryMiddle &&
-          primaryEntry.tag !== primaryMiddle.tag
+          rule.expansionMode === "urltest_pool_to_exits" ||
+          rule.expansionMode === "urltest_pool_single_hop"
         ) {
-          const intermediateRelayTag = `_RELAY_${rule.entryPrefix}_${primaryEntry.rawNodeName}_TO_${rule.middlePrefix}_${primaryMiddle.rawNodeName}`.replace(
-            /\s+/g,
-            "_"
-          );
-          if (!usedTags.has(intermediateRelayTag)) {
-            usedTags.add(intermediateRelayTag);
-            const relayOutbound = cloneOutboundWithDetour(
-              primaryMiddle.outbound,
-              intermediateRelayTag,
-              primaryEntry.tag
+          // 2-Hop Dynamic Pool: Entry urltest Pool -> Middle Chained urltest Pool -> Exits
+          const entryPoolTag =
+            entryCandidates.length > 1
+              ? registerUniqueTag(`_POOL_ENTRY_${rule.entryPrefix}_${rule.id.slice(-6)}`)
+              : entryCandidates[0].tag;
+          if (entryCandidates.length > 1) {
+            allOutbounds.push(
+              buildUrltestOutbound(
+                entryPoolTag,
+                entryCandidates.map((c) => c.tag)
+              )
             );
-            allOutbounds.push(relayOutbound);
+          }
+
+          const chainedMidTags: string[] = [];
+          for (const midNode of middleCandidates) {
+            const midRelayTag = registerUniqueTag(
+              `_RELAY_${rule.entryPrefix}_TO_${midNode.tag}`.replace(/\s+/g, "_")
+            );
+            allOutbounds.push(
+              cloneOutboundWithDetour(midNode.outbound, midRelayTag, entryPoolTag)
+            );
+            chainedMidTags.push(midRelayTag);
+          }
+
+          const midDetourTag =
+            chainedMidTags.length > 1
+              ? registerUniqueTag(`_POOL_MID_${rule.middlePrefix}_${rule.id.slice(-6)}`)
+              : chainedMidTags[0];
+          if (chainedMidTags.length > 1) {
+            allOutbounds.push(buildUrltestOutbound(midDetourTag, chainedMidTags));
           }
 
           for (const exitNode of exitCandidates.slice(0, maxForRule)) {
-            if (counter >= 999) break;
-            if (
-              exitNode.tag === primaryEntry.tag ||
-              exitNode.tag === primaryMiddle.tag
-            ) {
-              continue;
-            }
-
+            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
             const baseChainTag = formatChainNodeTag({
               scheme: namingScheme,
               hopCount: 2,
@@ -266,21 +453,20 @@ export function buildSingboxAndSurgePipeline(params: {
               middlePrefix: rule.middlePrefix,
               exitPrefix: rule.exitPrefix,
               exitRawName: exitNode.rawNodeName,
-              entryRawName: primaryEntry.rawNodeName,
-              middleRawName: primaryMiddle.rawNodeName,
+              entryRawName:
+                entryCandidates.length > 1
+                  ? `AutoPool(${entryCandidates.length})`
+                  : entryCandidates[0].rawNodeName,
+              middleRawName:
+                middleCandidates.length > 1
+                  ? `AutoPool(${middleCandidates.length})`
+                  : middleCandidates[0].rawNodeName,
             });
-            let chainTag = baseChainTag;
-            let dup = 1;
-            while (usedTags.has(chainTag)) {
-              chainTag = `${baseChainTag}_${dup}`;
-              dup++;
-            }
-            usedTags.add(chainTag);
-
+            const chainTag = registerUniqueTag(baseChainTag);
             const finalChainedOutbound = cloneOutboundWithDetour(
               exitNode.outbound,
               chainTag,
-              intermediateRelayTag
+              midDetourTag
             );
             allOutbounds.push(finalChainedOutbound);
 
@@ -303,15 +489,95 @@ export function buildSingboxAndSurgePipeline(params: {
               entryPrefix: rule.entryPrefix,
               middlePrefix: rule.middlePrefix,
               exitPrefix: rule.exitPrefix,
-              hopTags: [primaryEntry.tag, primaryMiddle.tag, exitNode.tag],
-              protocolChain: [
-                primaryEntry.protocol,
-                primaryMiddle.protocol,
-                exitNode.protocol,
-              ],
+              hopTags: [entryPoolTag, midDetourTag, exitNode.tag],
+              protocolChain: ["urltest-entry", "urltest-mid", exitNode.protocol],
               ruleId: rule.id,
               outbound: finalChainedOutbound,
             });
+          }
+        } else {
+          const primaryEntry =
+            entryCandidates.find(
+              (c) => c.tag === rule.preferredPrimaryEntryTag
+            ) || entryCandidates[0];
+          const primaryMiddle = middleCandidates[0];
+
+          if (
+            primaryEntry &&
+            primaryMiddle &&
+            primaryEntry.tag !== primaryMiddle.tag
+          ) {
+            const intermediateRelayTag = `_RELAY_${rule.entryPrefix}_${primaryEntry.rawNodeName}_TO_${rule.middlePrefix}_${primaryMiddle.rawNodeName}`.replace(
+              /\s+/g,
+              "_"
+            );
+            if (!usedTags.has(intermediateRelayTag)) {
+              usedTags.add(intermediateRelayTag);
+              const relayOutbound = cloneOutboundWithDetour(
+                primaryMiddle.outbound,
+                intermediateRelayTag,
+                primaryEntry.tag
+              );
+              allOutbounds.push(relayOutbound);
+            }
+
+            for (const exitNode of exitCandidates.slice(0, maxForRule)) {
+              if (counter >= MAX_SOCKS5_ENDPOINTS) break;
+              if (
+                exitNode.tag === primaryEntry.tag ||
+                exitNode.tag === primaryMiddle.tag
+              ) {
+                continue;
+              }
+
+              const baseChainTag = formatChainNodeTag({
+                scheme: namingScheme,
+                hopCount: 2,
+                entryPrefix: rule.entryPrefix,
+                middlePrefix: rule.middlePrefix,
+                exitPrefix: rule.exitPrefix,
+                exitRawName: exitNode.rawNodeName,
+                entryRawName: primaryEntry.rawNodeName,
+                middleRawName: primaryMiddle.rawNodeName,
+              });
+              const chainTag = registerUniqueTag(baseChainTag);
+
+              const finalChainedOutbound = cloneOutboundWithDetour(
+                exitNode.outbound,
+                chainTag,
+                intermediateRelayTag
+              );
+              allOutbounds.push(finalChainedOutbound);
+
+              const username = formatUsername(counter);
+              const password = "0";
+              counter++;
+              ruleGeneratedCount++;
+              if (sampleGeneratedTags.length < 4) {
+                sampleGeneratedTags.push(chainTag);
+              }
+
+              endpoints.push({
+                index: counter - 1,
+                username,
+                password,
+                finalTag: chainTag,
+                surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
+                hopCount: 2,
+                isSelfHop: false,
+                entryPrefix: rule.entryPrefix,
+                middlePrefix: rule.middlePrefix,
+                exitPrefix: rule.exitPrefix,
+                hopTags: [primaryEntry.tag, primaryMiddle.tag, exitNode.tag],
+                protocolChain: [
+                  primaryEntry.protocol,
+                  primaryMiddle.protocol,
+                  exitNode.protocol,
+                ],
+                ruleId: rule.id,
+                outbound: finalChainedOutbound,
+              });
+            }
           }
         }
       }
