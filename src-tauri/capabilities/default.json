@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for AGY Preview Instant",
+  "description": "Default capabilities for SingboxGUI V0",
   "windows": ["*"],
   "webviews": ["*"],
   "permissions": [
@@ -12,6 +12,9 @@
     "core:event:allow-unlisten",
     "core:window:default",
     "core:window:allow-set-title",
-    "opener:default"
+    "dialog:default",
+    "fs:default",
+    "shell:default"
   ]
 }
+

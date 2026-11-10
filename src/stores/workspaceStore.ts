@@ -30,9 +30,17 @@ import {
 } from "../types/singbox";
 import { SubscriptionItem, UserAgentType } from "../types/subscription";
 import { parseRawLogLine } from "../utils/ansiLogParser";
-import { buildSingboxAndSurgePipeline } from "../utils/chainProxyEngine";
-import { convertSubscriptionsToSingboxNodes } from "../utils/mihomoToSingboxConverter";
 import { getCurrentFormattedTime } from "../utils/subscriptionHelpers";
+import {
+  clearWorkspaceStorage,
+  executeFullCompilation,
+  loadInitialChainRules,
+  loadInitialNamingScheme,
+  loadInitialSubscriptions,
+  saveChainRulesToStorage,
+  saveNamingSchemeToStorage,
+  saveSubscriptionsToStorage,
+} from "./workspacePersistence";
 
 export type ActiveWorkspaceTab =
   | "topology"
@@ -121,108 +129,6 @@ interface WorkspaceState {
   logs: ParsedLogEntry[];
   appendLog: (rawLine: string) => void;
   clearLogs: () => void;
-}
-
-const STORAGE_SUBS_KEY = "singbox_gui_v0_subscriptions";
-const STORAGE_CHAINS_KEY = "singbox_gui_v0_chain_rules";
-const STORAGE_SCHEME_KEY = "singbox_gui_v0_naming_scheme";
-
-function loadInitialSubscriptions(): SubscriptionItem[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_SUBS_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_SUBSCRIPTIONS;
-}
-
-function loadInitialChainRules(): ChainLinkRule[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_CHAINS_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_CHAIN_LINK_RULES;
-}
-
-function loadInitialNamingScheme(): ChainNamingSchemeId {
-  try {
-    const saved = localStorage.getItem(
-      STORAGE_SCHEME_KEY
-    ) as ChainNamingSchemeId | null;
-    if (
-      saved === "scheme_a_tilde" ||
-      saved === "scheme_b_dir" ||
-      saved === "scheme_c_exit_at"
-    ) {
-      return saved;
-    }
-  } catch {
-    // ignore
-  }
-  return "scheme_a_tilde";
-}
-
-function executeFullCompilation(state: {
-  subscriptions: SubscriptionItem[];
-  namingScheme: ChainNamingSchemeId;
-  securityPolicy: TlsSecurityPolicyMode;
-  excludedProtocols: string[];
-  chainRules: ChainLinkRule[];
-  listenIp: string;
-  listenPort: number;
-  logLevel: string;
-  autoDetectInterface: boolean;
-  includeSurgeProxyGroups: boolean;
-}) {
-  const { directNodes, dnsServers, dnsRules, summaries } =
-    convertSubscriptionsToSingboxNodes({
-      subscriptions: state.subscriptions,
-      namingScheme: state.namingScheme,
-      securityPolicy: state.securityPolicy,
-      excludedProtocols: state.excludedProtocols,
-    });
-
-  const {
-    singboxConfig,
-    surgeConfigText,
-    endpoints,
-    providerNodes,
-    visualEdges,
-  } = buildSingboxAndSurgePipeline({
-    directNodes,
-    dnsServers,
-    dnsRules,
-    chainRules: state.chainRules,
-    namingScheme: state.namingScheme,
-    listenIp: state.listenIp,
-    listenPort: state.listenPort,
-    logLevel: state.logLevel,
-    autoDetectInterface: state.autoDetectInterface,
-    includeSurgeProxyGroups: state.includeSurgeProxyGroups,
-  });
-
-  return {
-    directNodes,
-    summaries,
-    singboxConfig,
-    surgeConfigText,
-    endpoints,
-    providerNodes,
-    visualEdges,
-  };
 }
 
 const initialSubs = loadInitialSubscriptions();
@@ -322,11 +228,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         nextSubs.push(newSub);
       }
 
-      try {
-        localStorage.setItem(STORAGE_SUBS_KEY, JSON.stringify(nextSubs));
-      } catch {
-        // ignore
-      }
+      saveSubscriptionsToStorage(nextSubs);
 
       set({
         subscriptions: nextSubs,
@@ -359,11 +261,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const nextSubs = get().subscriptions.map((s) =>
       s.id === id ? { ...s, enabled: !s.enabled } : s
     );
-    try {
-      localStorage.setItem(STORAGE_SUBS_KEY, JSON.stringify(nextSubs));
-    } catch {
-      // ignore
-    }
+    saveSubscriptionsToStorage(nextSubs);
     set({ subscriptions: nextSubs });
     get().recomputePipeline();
   },
@@ -380,33 +278,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       return updated;
     });
-    try {
-      localStorage.setItem(STORAGE_SUBS_KEY, JSON.stringify(nextSubs));
-    } catch {
-      // ignore
-    }
+    saveSubscriptionsToStorage(nextSubs);
     set({ subscriptions: nextSubs });
     get().recomputePipeline();
   },
 
   deleteSubscriptionItem: (id) => {
     const nextSubs = get().subscriptions.filter((s) => s.id !== id);
-    try {
-      localStorage.setItem(STORAGE_SUBS_KEY, JSON.stringify(nextSubs));
-    } catch {
-      // ignore
-    }
+    saveSubscriptionsToStorage(nextSubs);
     set({ subscriptions: nextSubs });
     get().recomputePipeline();
   },
 
   resetDemoSubscriptions: () => {
-    try {
-      localStorage.removeItem(STORAGE_SUBS_KEY);
-      localStorage.removeItem(STORAGE_CHAINS_KEY);
-    } catch {
-      // ignore
-    }
+    clearWorkspaceStorage();
     set({
       subscriptions: DEFAULT_SUBSCRIPTIONS,
       chainRules: DEFAULT_CHAIN_LINK_RULES,
@@ -416,11 +301,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   namingScheme: initialScheme,
   setNamingScheme: (scheme) => {
-    try {
-      localStorage.setItem(STORAGE_SCHEME_KEY, scheme);
-    } catch {
-      // ignore
-    }
+    saveNamingSchemeToStorage(scheme);
     set({ namingScheme: scheme });
     get().recomputePipeline();
   },
@@ -473,11 +354,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       id: `chain_${Date.now()}`,
     };
     const nextRules = [...get().chainRules, newRule];
-    try {
-      localStorage.setItem(STORAGE_CHAINS_KEY, JSON.stringify(nextRules));
-    } catch {
-      // ignore
-    }
+    saveChainRulesToStorage(nextRules);
     set({ chainRules: nextRules, selectedChainRuleId: newRule.id });
     get().recomputePipeline();
     get().appendLog(
@@ -489,22 +366,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const nextRules = get().chainRules.map((r) =>
       r.id === id ? { ...r, ...patch } : r
     );
-    try {
-      localStorage.setItem(STORAGE_CHAINS_KEY, JSON.stringify(nextRules));
-    } catch {
-      // ignore
-    }
+    saveChainRulesToStorage(nextRules);
     set({ chainRules: nextRules });
     get().recomputePipeline();
   },
 
   deleteChainRule: (id) => {
     const nextRules = get().chainRules.filter((r) => r.id !== id);
-    try {
-      localStorage.setItem(STORAGE_CHAINS_KEY, JSON.stringify(nextRules));
-    } catch {
-      // ignore
-    }
+    saveChainRulesToStorage(nextRules);
     set((s) => ({
       chainRules: nextRules,
       selectedChainRuleId:
@@ -519,11 +388,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const nextRules = get().chainRules.map((r) =>
       r.id === id ? { ...r, enabled: !r.enabled } : r
     );
-    try {
-      localStorage.setItem(STORAGE_CHAINS_KEY, JSON.stringify(nextRules));
-    } catch {
-      // ignore
-    }
+    saveChainRulesToStorage(nextRules);
     set({ chainRules: nextRules });
     get().recomputePipeline();
   },
