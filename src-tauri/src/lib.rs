@@ -72,6 +72,8 @@ pub fn run() {
             commands::singbox::validate_singbox_config_cmd,
             commands::mitm::sniff_mitm_port,
             commands::mitm::toggle_mitm_listener,
+            commands::mitm::check_port_availability,
+            commands::mitm::run_connectivity_test_cmd,
             commands::cert::import_ca_cert,
             commands::cert::generate_self_signed_ca,
         ])

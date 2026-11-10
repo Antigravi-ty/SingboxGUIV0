@@ -1,0 +1,3 @@
+# Tauri v2 sidecar binary directory.
+# Place `sing-box` or `sing-box-<target-triple>` (e.g., `sing-box-aarch64-apple-darwin`) here.
+# Binaries in this folder are gitignored and will not be committed to the repository.

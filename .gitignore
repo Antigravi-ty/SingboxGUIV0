@@ -6,3 +6,11 @@ dist-ssr
 .DS_Store
 src-tauri/target
 src-tauri/gen
+bin/*
+!bin/.gitkeep
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+sing-box
+sing-box.exe
+src-tauri/sing-box
+src-tauri/sing-box.exe

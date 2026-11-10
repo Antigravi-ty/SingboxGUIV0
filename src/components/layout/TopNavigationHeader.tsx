@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Activity,
   CheckCircle2,
   FileCode2,
   GitBranch,
@@ -18,6 +17,8 @@ import {
   ActiveWorkspaceTab,
   useWorkspaceStore,
 } from "../../stores/workspaceStore";
+import { SingboxBrandIcon } from "./SingboxBrandIcon";
+import { TopbarSettingsPopover } from "./TopbarSettingsPopover";
 
 const NAV_TABS: Array<{
   id: ActiveWorkspaceTab;
@@ -57,13 +58,14 @@ const NAV_TABS: Array<{
 ];
 
 export const TopNavigationHeader: React.FC = () => {
-  const { colorMode, toggleColorMode } = useThemeStore();
+  const { colorMode, topbarIconStyle, toggleColorMode } = useThemeStore();
   const activeTab = useWorkspaceStore((s) => s.activeTab);
   const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
   const endpoints = useWorkspaceStore((s) => s.endpoints);
   const directNodes = useWorkspaceStore((s) => s.directNodes);
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
   const lastCheckResult = useWorkspaceStore((s) => s.lastCheckResult);
   const runSingboxCheck = useWorkspaceStore((s) => s.runSingboxCheck);
 
@@ -91,12 +93,10 @@ export const TopNavigationHeader: React.FC = () => {
               color: "var(--fg-default)",
             }}
           >
-            <img
-              src="/favicon.svg"
-              alt="Sing-box"
-              width={20}
-              height={20}
-              style={{ display: "block", flexShrink: 0 }}
+            <SingboxBrandIcon
+              styleMode={topbarIconStyle}
+              colorMode={colorMode}
+              size={20}
             />
             <span>SingboxGUI V0</span>
           </div>
@@ -108,6 +108,13 @@ export const TopNavigationHeader: React.FC = () => {
           <span className="primer-badge primer-badge-success">
             SOCKS5 Bridge: {listenIp}:{listenPort} ({endpoints.length} users:{" "}
             {directNodes.length} Direct + {chainCount} Chain)
+          </span>
+
+          <span
+            className="primer-badge"
+            title="route.auto_detect_interface in generated Sing-box 1.14.4 config.json"
+          >
+            auto_detect_interface: {autoDetectInterface ? "true" : "false"}
           </span>
 
           {insecureCount > 0 && (
@@ -142,7 +149,10 @@ export const TopNavigationHeader: React.FC = () => {
                 ? "primer-btn-status-success"
                 : "primer-btn-status-danger"
             }`}
-            title="Validate generated config.json against Sing-box 1.14.4 schema"
+            title={
+              lastCheckResult?.commandOutput ||
+              "Validate generated config.json against Sing-box 1.14.4 schema"
+            }
           >
             {lastCheckResult?.valid !== false ? (
               <CheckCircle2 size={13} />
@@ -152,11 +162,15 @@ export const TopNavigationHeader: React.FC = () => {
             <span>
               {lastCheckResult
                 ? lastCheckResult.valid
-                  ? "1.14.4 Check: PASS"
+                  ? lastCheckResult.binaryFound === false
+                    ? "1.14.4 Schema: PASS"
+                    : "1.14.4 Check: PASS"
                   : "1.14.4 Check: FAIL"
                 : "Verify 1.14.4 Config"}
             </span>
           </button>
+
+          <TopbarSettingsPopover />
 
           <button
             type="button"

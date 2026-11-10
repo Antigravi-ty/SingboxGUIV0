@@ -7,6 +7,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import * as net from "node:net";
+import { resolveSingboxBinaryPath } from "./viteServer/binaryResolver";
+import {
+  checkTcpPortAvailability,
+  runConnectivityProbe,
+} from "./viteServer/connectivityHandler";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,6 +38,7 @@ function sendJson(res: any, status: number, payload: any) {
 }
 
 function singboxDevApiPlugin(): Plugin {
+  const projectRoot = process.cwd();
   return {
     name: "singbox-dev-api-middleware",
     configureServer(server) {
@@ -109,27 +115,41 @@ function singboxDevApiPlugin(): Plugin {
 
           if (route === "/__singbox_api/singbox-check" && req.method === "POST") {
             const { configContent } = await readJsonBody(req);
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            if (!resolved.found) {
+              return sendJson(res, 200, {
+                valid: false,
+                binary_found: false,
+                binary_path: resolved.binaryPath,
+                searched_paths: resolved.searchedPaths.slice(0, 6),
+                version: "sing-box 1.14.4",
+                output: `BINARY_NOT_FOUND: sing-box binary not found at ${resolved.binaryPath}. Place your local sing-box binary in ./bin/sing-box or ./src-tauri/binaries/sing-box`,
+              });
+            }
+
             const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
             const cfgFile = path.join(os.tmpdir(), `sb_check_${id}.json`);
             try {
               fs.writeFileSync(cfgFile, String(configContent || ""), "utf-8");
-              const { stdout, stderr } = await execFileAsync("sing-box", [
+              const { stdout, stderr } = await execFileAsync(resolved.binaryPath, [
                 "check",
                 "-c",
                 cfgFile,
               ]);
-              const verOut = await execFileAsync("sing-box", ["version"]).catch(() => ({
-                stdout: "sing-box 1.14.4",
-              }));
+              const verOut = await execFileAsync(resolved.binaryPath, ["version"]).catch(
+                () => ({ stdout: "sing-box 1.14.4" })
+              );
               const firstLine =
                 verOut.stdout.split(/\r?\n/).find((l) => l.trim().length > 0) ||
                 "sing-box 1.14.4";
               return sendJson(res, 200, {
                 valid: true,
+                binary_found: true,
+                binary_path: resolved.binaryPath,
                 version: firstLine,
                 output:
                   (stdout + "\n" + stderr).trim() ||
-                  "sing-box check -c config.json passed with 0 errors (Sing-box 1.14.4 binary verified).",
+                  `sing-box check -c config.json passed with 0 errors (${resolved.binaryPath}).`,
               });
             } catch (err: any) {
               const errMsg = [err?.stdout, err?.stderr, err?.message]
@@ -138,6 +158,8 @@ function singboxDevApiPlugin(): Plugin {
                 .trim();
               return sendJson(res, 200, {
                 valid: false,
+                binary_found: true,
+                binary_path: resolved.binaryPath,
                 version: "sing-box 1.14.4",
                 output: errMsg || "sing-box check failed",
               });
@@ -149,29 +171,59 @@ function singboxDevApiPlugin(): Plugin {
           }
 
           if (route === "/__singbox_api/binary-status" && req.method === "GET") {
+            const resolved = await resolveSingboxBinaryPath(projectRoot);
+            if (!resolved.found) {
+              return sendJson(res, 200, {
+                imported: false,
+                binary_name: "sing-box",
+                binary_path: resolved.binaryPath,
+                file_size: 0,
+                version: null,
+                searched_paths: resolved.searchedPaths.slice(0, 6),
+              });
+            }
             try {
-              const { stdout } = await execFileAsync("sing-box", ["version"]);
+              const { stdout } = await execFileAsync(resolved.binaryPath, ["version"]);
               const firstLine =
                 stdout.split(/\r?\n/).find((l) => l.trim().length > 0) ||
                 "sing-box version 1.14.4";
-              const binPath = "/usr/local/bin/sing-box";
-              const stat = fs.existsSync(binPath) ? fs.statSync(binPath) : null;
+              const stat = fs.existsSync(resolved.binaryPath)
+                ? fs.statSync(resolved.binaryPath)
+                : null;
               return sendJson(res, 200, {
                 imported: true,
                 binary_name: "sing-box",
-                binary_path: binPath,
-                file_size: stat ? stat.size : 32505856,
+                binary_path: resolved.binaryPath,
+                file_size: stat ? stat.size : 0,
                 version: firstLine.replace("sing-box version ", "").trim(),
+                searched_paths: resolved.searchedPaths.slice(0, 6),
               });
             } catch {
               return sendJson(res, 200, {
                 imported: false,
-                binary_name: null,
-                binary_path: null,
-                file_size: null,
+                binary_name: "sing-box",
+                binary_path: resolved.binaryPath,
+                file_size: 0,
                 version: null,
+                searched_paths: resolved.searchedPaths.slice(0, 6),
               });
             }
+          }
+
+          if (route === "/__singbox_api/check-port" && req.method === "POST") {
+            const { host, port } = await readJsonBody(req);
+            const targetPort = Math.max(1, Math.min(65535, Number(port) || 11400));
+            const status = await checkTcpPortAvailability(
+              String(host || "127.0.0.1"),
+              targetPort
+            );
+            return sendJson(res, 200, status);
+          }
+
+          if (route === "/__singbox_api/connectivity-test" && req.method === "POST") {
+            const body = await readJsonBody(req);
+            const result = await runConnectivityProbe(body || {});
+            return sendJson(res, 200, result);
           }
 
           if (route === "/__singbox_api/generate-ca" && req.method === "POST") {
@@ -317,4 +369,3 @@ export default defineConfig({
     },
   },
 });
-

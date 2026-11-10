@@ -1,4 +1,4 @@
-use crate::paths::{resolve_app_config_dir, resolve_singbox_binary};
+use crate::paths::{candidate_singbox_paths, resolve_app_config_dir, resolve_singbox_binary};
 use serde::Serialize;
 use std::process::Command;
 use tauri::AppHandle;
@@ -10,6 +10,7 @@ pub struct BinaryStatusInfo {
     pub binary_path: String,
     pub file_size: u64,
     pub version: Option<String>,
+    pub searched_paths: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -17,18 +18,27 @@ pub struct SingboxValidationResponse {
     pub valid: bool,
     pub version: String,
     pub output: String,
+    pub binary_found: bool,
+    pub binary_path: String,
 }
 
 #[tauri::command]
 pub fn check_binary_status(app: AppHandle) -> Result<BinaryStatusInfo, String> {
     let bin_path = resolve_singbox_binary(&app);
-    if !bin_path.exists() {
+    let searched_paths: Vec<String> = candidate_singbox_paths(&app)
+        .into_iter()
+        .take(8)
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    if !bin_path.is_file() {
         return Ok(BinaryStatusInfo {
             imported: false,
             binary_name: "sing-box".to_string(),
             binary_path: bin_path.to_string_lossy().to_string(),
             file_size: 0,
             version: None,
+            searched_paths,
         });
     }
 
@@ -46,6 +56,7 @@ pub fn check_binary_status(app: AppHandle) -> Result<BinaryStatusInfo, String> {
         binary_path: bin_path.to_string_lossy().to_string(),
         file_size,
         version,
+        searched_paths,
     })
 }
 
@@ -55,6 +66,13 @@ pub fn validate_singbox_config_cmd(
     config_content: String,
 ) -> Result<SingboxValidationResponse, String> {
     let bin_path = resolve_singbox_binary(&app);
+    if !bin_path.is_file() {
+        return Err(format!(
+            "BINARY_NOT_FOUND: sing-box binary not found at {}. Place it in ./bin/sing-box or ./src-tauri/binaries/sing-box",
+            bin_path.to_string_lossy()
+        ));
+    }
+
     let dir = resolve_app_config_dir(&app)?;
     let temp_cfg = dir.join("check_config.json");
     std::fs::write(&temp_cfg, &config_content)
@@ -73,7 +91,7 @@ pub fn validate_singbox_config_cmd(
         .arg("-c")
         .arg(&temp_cfg)
         .output()
-        .map_err(|e| format!("Failed to invoke sing-box check: {}", e))?;
+        .map_err(|e| format!("BINARY_NOT_FOUND: Failed to invoke sing-box check: {}", e))?;
 
     let _ = std::fs::remove_file(&temp_cfg);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -84,9 +102,14 @@ pub fn validate_singbox_config_cmd(
         valid: output.status.success(),
         version: version_str,
         output: if combined.is_empty() {
-            "sing-box check -c config.json passed with 0 errors.".to_string()
+            format!(
+                "sing-box check -c config.json passed with 0 errors ({}).",
+                bin_path.to_string_lossy()
+            )
         } else {
             combined
         },
+        binary_found: true,
+        binary_path: bin_path.to_string_lossy().to_string(),
     })
 }

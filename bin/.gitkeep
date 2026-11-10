@@ -1,0 +1,2 @@
+# Place your local `sing-box` binary here (e.g. `./bin/sing-box` or `./src-tauri/binaries/sing-box`).
+# Binaries in this folder are gitignored and will not be committed to the repository.

@@ -169,14 +169,50 @@ export interface SingboxCheckResult {
   version: string;
   commandOutput: string;
   checkedAt: string;
+  binaryFound?: boolean;
+  binaryPath?: string;
 }
 
 export interface BinaryStatusInfo {
   imported: boolean;
-  binary_name: string;
-  binary_path: string;
-  file_size: number;
-  version?: string;
+  binary_name: string | null;
+  binary_path: string | null;
+  file_size: number | null;
+  version?: string | null;
+  searched_paths?: string[];
+}
+
+export type ConnectivityTestMethod =
+  | "http_fetch"
+  | "socks5_http"
+  | "tcp_ping"
+  | "icmp_ping";
+
+export interface ConnectivityTestPresetTarget {
+  id: string;
+  label: string;
+  category: "HTTP 204 / Trace" | "DNS / IP Anycast" | "Custom";
+  target: string;
+  recommendedMethod: ConnectivityTestMethod;
+  description: string;
+}
+
+export interface ConnectivityTestResult {
+  success: boolean;
+  method: ConnectivityTestMethod | string;
+  target: string;
+  latency_ms: number;
+  status_code: number | null;
+  detail: string;
+  testedAt: string;
+}
+
+export interface PortAvailabilityResult {
+  port: number;
+  host: string;
+  occupied: boolean;
+  available: boolean;
+  message: string;
 }
 
 export interface UnexpectedExitPayload {
@@ -194,3 +230,4 @@ export interface ParsedLogEntry {
   message: string;
   raw: string;
 }
+
