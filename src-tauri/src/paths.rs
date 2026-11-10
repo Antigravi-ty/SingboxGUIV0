@@ -33,6 +33,10 @@ pub fn default_surge_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_config_dir(app)?.join("aSingbox127.conf"))
 }
 
+pub fn default_ui_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("ui-config.json"))
+}
+
 fn target_sidecar_filenames() -> Vec<&'static str> {
     if cfg!(target_os = "windows") {
         vec![

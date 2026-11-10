@@ -15,8 +15,18 @@ import {
   SingboxOutbound,
   SingboxRouteRule,
 } from "../types/singbox";
+import {
+  buildUrltestOutbound,
+  cloneOutboundWithDetour,
+  expandTwoHopRule,
+  MAX_SOCKS5_ENDPOINTS,
+} from "./chainTwoHopExpander";
+import {
+  buildSurgeConfigContent,
+  buildTopologyProviderNodes,
+} from "./surgeConfigBuilder";
 
-export const MAX_SOCKS5_ENDPOINTS = 5000;
+export { MAX_SOCKS5_ENDPOINTS };
 
 function safeRegexMatch(pattern: string | undefined, target: string): boolean {
   const trimmed = (pattern || "").trim();
@@ -29,28 +39,6 @@ function safeRegexMatch(pattern: string | undefined, target: string): boolean {
   } catch {
     return target.toLowerCase().includes(trimmed.toLowerCase());
   }
-}
-
-function cloneOutboundWithDetour(
-  baseOutbound: SingboxOutbound,
-  newTag: string,
-  detourTag: string
-): SingboxOutbound {
-  const cloned = JSON.parse(JSON.stringify(baseOutbound)) as SingboxOutbound;
-  cloned.tag = newTag;
-  cloned.detour = detourTag;
-  return cloned;
-}
-
-function buildUrltestOutbound(tag: string, memberTags: string[]): SingboxOutbound {
-  return {
-    type: "urltest",
-    tag,
-    outbounds: memberTags,
-    url: "https://www.gstatic.com/generate_204",
-    interval: "3m",
-    tolerance: 50,
-  };
 }
 
 export function buildSingboxAndSurgePipeline(params: {
@@ -85,9 +73,7 @@ export function buildSingboxAndSurgePipeline(params: {
   } = params;
 
   const endpoints: GeneratedProxyEndpoint[] = [];
-  const allOutbounds: SingboxOutbound[] = [
-    { type: "direct", tag: "direct" },
-  ];
+  const allOutbounds: SingboxOutbound[] = [{ type: "direct", tag: "direct" }];
   const usedTags = new Set<string>(["direct"]);
 
   const byPrefix = new Map<string, ConvertedNodeMetadata[]>();
@@ -97,22 +83,22 @@ export function buildSingboxAndSurgePipeline(params: {
     byPrefix.set(node.providerPrefix, list);
   }
 
-  let counter = 0;
+  const counterRef = { value: 0 };
   const formatUsername = (idx: number) =>
     idx < 1000 ? String(idx).padStart(3, "0") : String(idx);
 
   for (const node of directNodes) {
-    if (counter >= MAX_SOCKS5_ENDPOINTS) break;
-    const username = formatUsername(counter);
+    if (counterRef.value >= MAX_SOCKS5_ENDPOINTS) break;
+    const username = formatUsername(counterRef.value);
     const password = "0";
-    counter++;
+    counterRef.value++;
 
     usedTags.add(node.tag);
     allOutbounds.push(node.outbound);
 
     const surgeLine = `${node.tag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`;
     endpoints.push({
-      index: counter - 1,
+      index: counterRef.value - 1,
       username,
       password,
       finalTag: node.tag,
@@ -159,8 +145,7 @@ export function buildSingboxAndSurgePipeline(params: {
 
     const isSelfHop =
       rule.hopCount === 1 && rule.entryPrefix === rule.exitPrefix;
-    const edgeColor =
-      PROVIDER_COLOR_MAP[rule.entryPrefix] || "#58a6ff";
+    const edgeColor = PROVIDER_COLOR_MAP[rule.entryPrefix] || "#58a6ff";
 
     const sampleGeneratedTags: string[] = [];
     let ruleGeneratedCount = 0;
@@ -178,7 +163,6 @@ export function buildSingboxAndSurgePipeline(params: {
           rule.expansionMode === "urltest_pool_to_exits" ||
           rule.expansionMode === "urltest_pool_single_hop"
         ) {
-          // Dynamic Entry Pool via Sing-box 1.14.4 `urltest` outbound
           const sharedEntryPoolTag = registerUniqueTag(
             `_POOL_ENTRY_${rule.entryPrefix}_${rule.id.slice(-6)}`
           );
@@ -194,9 +178,8 @@ export function buildSingboxAndSurgePipeline(params: {
           const chainedExitTagsForSinglePool: string[] = [];
 
           for (const exitNode of exitCandidates.slice(0, maxForRule)) {
-            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
+            if (counterRef.value >= MAX_SOCKS5_ENDPOINTS) break;
 
-            // Prevent self-loop when entry and exit are in the same subscription
             const validEntries = entryCandidates.filter(
               (e) => e.tag !== exitNode.tag
             );
@@ -209,7 +192,10 @@ export function buildSingboxAndSurgePipeline(params: {
               detourTargetTag = sharedEntryPoolTag;
             } else {
               const filteredPoolTag = registerUniqueTag(
-                `_POOL_ENTRY_${rule.entryPrefix}_EX_${exitNode.rawNodeName.replace(/\s+/g, "_")}`
+                `_POOL_ENTRY_${rule.entryPrefix}_EX_${exitNode.rawNodeName.replace(
+                  /\s+/g,
+                  "_"
+                )}`
               );
               allOutbounds.push(
                 buildUrltestOutbound(
@@ -252,16 +238,16 @@ export function buildSingboxAndSurgePipeline(params: {
               );
               allOutbounds.push(chainedOutbound);
 
-              const username = formatUsername(counter);
+              const username = formatUsername(counterRef.value);
               const password = "0";
-              counter++;
+              counterRef.value++;
               ruleGeneratedCount++;
               if (sampleGeneratedTags.length < 4) {
                 sampleGeneratedTags.push(chainTag);
               }
 
               endpoints.push({
-                index: counter - 1,
+                index: counterRef.value - 1,
                 username,
                 password,
                 finalTag: chainTag,
@@ -286,7 +272,7 @@ export function buildSingboxAndSurgePipeline(params: {
           if (
             rule.expansionMode === "urltest_pool_single_hop" &&
             chainedExitTagsForSinglePool.length > 0 &&
-            counter < MAX_SOCKS5_ENDPOINTS
+            counterRef.value < MAX_SOCKS5_ENDPOINTS
           ) {
             const singlePoolTag = registerUniqueTag(
               formatChainNodeTag({
@@ -304,14 +290,14 @@ export function buildSingboxAndSurgePipeline(params: {
             );
             allOutbounds.push(topPoolOutbound);
 
-            const username = formatUsername(counter);
+            const username = formatUsername(counterRef.value);
             const password = "0";
-            counter++;
+            counterRef.value++;
             ruleGeneratedCount++;
             sampleGeneratedTags.push(singlePoolTag);
 
             endpoints.push({
-              index: counter - 1,
+              index: counterRef.value - 1,
               username,
               password,
               finalTag: singlePoolTag,
@@ -330,7 +316,6 @@ export function buildSingboxAndSurgePipeline(params: {
             });
           }
         } else {
-          // Static Pairing Modes: primary_entry_to_all_exits, round_robin_pairing, full_cartesian
           const pairs: Array<{
             entry: ConvertedNodeMetadata;
             exit: ConvertedNodeMetadata;
@@ -363,7 +348,7 @@ export function buildSingboxAndSurgePipeline(params: {
           }
 
           for (const pair of pairs.slice(0, maxForRule)) {
-            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
+            if (counterRef.value >= MAX_SOCKS5_ENDPOINTS) break;
             const baseChainTag = formatChainNodeTag({
               scheme: namingScheme,
               hopCount: 1,
@@ -381,16 +366,16 @@ export function buildSingboxAndSurgePipeline(params: {
             );
             allOutbounds.push(chainedOutbound);
 
-            const username = formatUsername(counter);
+            const username = formatUsername(counterRef.value);
             const password = "0";
-            counter++;
+            counterRef.value++;
             ruleGeneratedCount++;
             if (sampleGeneratedTags.length < 4) {
               sampleGeneratedTags.push(chainTag);
             }
 
             endpoints.push({
-              index: counter - 1,
+              index: counterRef.value - 1,
               username,
               password,
               finalTag: chainTag,
@@ -407,179 +392,22 @@ export function buildSingboxAndSurgePipeline(params: {
           }
         }
       } else if (rule.hopCount === 2 && rule.middlePrefix) {
-        if (
-          rule.expansionMode === "urltest_pool_to_exits" ||
-          rule.expansionMode === "urltest_pool_single_hop"
-        ) {
-          // 2-Hop Dynamic Pool: Entry urltest Pool -> Middle Chained urltest Pool -> Exits
-          const entryPoolTag =
-            entryCandidates.length > 1
-              ? registerUniqueTag(`_POOL_ENTRY_${rule.entryPrefix}_${rule.id.slice(-6)}`)
-              : entryCandidates[0].tag;
-          if (entryCandidates.length > 1) {
-            allOutbounds.push(
-              buildUrltestOutbound(
-                entryPoolTag,
-                entryCandidates.map((c) => c.tag)
-              )
-            );
-          }
-
-          const chainedMidTags: string[] = [];
-          for (const midNode of middleCandidates) {
-            const midRelayTag = registerUniqueTag(
-              `_RELAY_${rule.entryPrefix}_TO_${midNode.tag}`.replace(/\s+/g, "_")
-            );
-            allOutbounds.push(
-              cloneOutboundWithDetour(midNode.outbound, midRelayTag, entryPoolTag)
-            );
-            chainedMidTags.push(midRelayTag);
-          }
-
-          const midDetourTag =
-            chainedMidTags.length > 1
-              ? registerUniqueTag(`_POOL_MID_${rule.middlePrefix}_${rule.id.slice(-6)}`)
-              : chainedMidTags[0];
-          if (chainedMidTags.length > 1) {
-            allOutbounds.push(buildUrltestOutbound(midDetourTag, chainedMidTags));
-          }
-
-          for (const exitNode of exitCandidates.slice(0, maxForRule)) {
-            if (counter >= MAX_SOCKS5_ENDPOINTS) break;
-            const baseChainTag = formatChainNodeTag({
-              scheme: namingScheme,
-              hopCount: 2,
-              entryPrefix: rule.entryPrefix,
-              middlePrefix: rule.middlePrefix,
-              exitPrefix: rule.exitPrefix,
-              exitRawName: exitNode.rawNodeName,
-              entryRawName:
-                entryCandidates.length > 1
-                  ? `AutoPool(${entryCandidates.length})`
-                  : entryCandidates[0].rawNodeName,
-              middleRawName:
-                middleCandidates.length > 1
-                  ? `AutoPool(${middleCandidates.length})`
-                  : middleCandidates[0].rawNodeName,
-            });
-            const chainTag = registerUniqueTag(baseChainTag);
-            const finalChainedOutbound = cloneOutboundWithDetour(
-              exitNode.outbound,
-              chainTag,
-              midDetourTag
-            );
-            allOutbounds.push(finalChainedOutbound);
-
-            const username = formatUsername(counter);
-            const password = "0";
-            counter++;
-            ruleGeneratedCount++;
-            if (sampleGeneratedTags.length < 4) {
-              sampleGeneratedTags.push(chainTag);
-            }
-
-            endpoints.push({
-              index: counter - 1,
-              username,
-              password,
-              finalTag: chainTag,
-              surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
-              hopCount: 2,
-              isSelfHop: false,
-              entryPrefix: rule.entryPrefix,
-              middlePrefix: rule.middlePrefix,
-              exitPrefix: rule.exitPrefix,
-              hopTags: [entryPoolTag, midDetourTag, exitNode.tag],
-              protocolChain: ["urltest-entry", "urltest-mid", exitNode.protocol],
-              ruleId: rule.id,
-              outbound: finalChainedOutbound,
-            });
-          }
-        } else {
-          const primaryEntry =
-            entryCandidates.find(
-              (c) => c.tag === rule.preferredPrimaryEntryTag
-            ) || entryCandidates[0];
-          const primaryMiddle = middleCandidates[0];
-
-          if (
-            primaryEntry &&
-            primaryMiddle &&
-            primaryEntry.tag !== primaryMiddle.tag
-          ) {
-            const intermediateRelayTag = `_RELAY_${rule.entryPrefix}_${primaryEntry.rawNodeName}_TO_${rule.middlePrefix}_${primaryMiddle.rawNodeName}`.replace(
-              /\s+/g,
-              "_"
-            );
-            if (!usedTags.has(intermediateRelayTag)) {
-              usedTags.add(intermediateRelayTag);
-              const relayOutbound = cloneOutboundWithDetour(
-                primaryMiddle.outbound,
-                intermediateRelayTag,
-                primaryEntry.tag
-              );
-              allOutbounds.push(relayOutbound);
-            }
-
-            for (const exitNode of exitCandidates.slice(0, maxForRule)) {
-              if (counter >= MAX_SOCKS5_ENDPOINTS) break;
-              if (
-                exitNode.tag === primaryEntry.tag ||
-                exitNode.tag === primaryMiddle.tag
-              ) {
-                continue;
-              }
-
-              const baseChainTag = formatChainNodeTag({
-                scheme: namingScheme,
-                hopCount: 2,
-                entryPrefix: rule.entryPrefix,
-                middlePrefix: rule.middlePrefix,
-                exitPrefix: rule.exitPrefix,
-                exitRawName: exitNode.rawNodeName,
-                entryRawName: primaryEntry.rawNodeName,
-                middleRawName: primaryMiddle.rawNodeName,
-              });
-              const chainTag = registerUniqueTag(baseChainTag);
-
-              const finalChainedOutbound = cloneOutboundWithDetour(
-                exitNode.outbound,
-                chainTag,
-                intermediateRelayTag
-              );
-              allOutbounds.push(finalChainedOutbound);
-
-              const username = formatUsername(counter);
-              const password = "0";
-              counter++;
-              ruleGeneratedCount++;
-              if (sampleGeneratedTags.length < 4) {
-                sampleGeneratedTags.push(chainTag);
-              }
-
-              endpoints.push({
-                index: counter - 1,
-                username,
-                password,
-                finalTag: chainTag,
-                surgeProxyLine: `${chainTag} = socks5, ${listenIp}, ${listenPort}, username=${username}, password=${password}`,
-                hopCount: 2,
-                isSelfHop: false,
-                entryPrefix: rule.entryPrefix,
-                middlePrefix: rule.middlePrefix,
-                exitPrefix: rule.exitPrefix,
-                hopTags: [primaryEntry.tag, primaryMiddle.tag, exitNode.tag],
-                protocolChain: [
-                  primaryEntry.protocol,
-                  primaryMiddle.protocol,
-                  exitNode.protocol,
-                ],
-                ruleId: rule.id,
-                outbound: finalChainedOutbound,
-              });
-            }
-          }
-        }
+        ruleGeneratedCount = expandTwoHopRule({
+          rule,
+          namingScheme,
+          entryCandidates,
+          middleCandidates,
+          exitCandidates,
+          maxForRule,
+          listenIp,
+          listenPort,
+          counterRef,
+          registerUniqueTag,
+          formatUsername,
+          allOutbounds,
+          endpoints,
+          sampleGeneratedTags,
+        });
       }
     }
 
@@ -640,81 +468,19 @@ export function buildSingboxAndSurgePipeline(params: {
     },
   };
 
-  const providerNodes: TopologyProviderNode[] = [];
-  for (const [prefix, nodes] of byPrefix.entries()) {
-    const protocols = Array.from(new Set(nodes.map((n) => n.protocol)));
-    const insecureCount = nodes.filter((n) => n.effectiveInsecure).length;
-    const hasCustomDoH = nodes.some((n) => Boolean(n.domainResolverTag));
-    providerNodes.push({
-      prefix,
-      label: `${prefix} Provider (${nodes.length} nodes)`,
-      nodeCount: nodes.length,
-      insecureCount,
-      protocols,
-      colorHex: PROVIDER_COLOR_MAP[prefix] || "#58a6ff",
-      sampleNodes: nodes.slice(0, 4).map((n) => n.rawNodeName),
-      hasCustomDoH,
-    });
-  }
+  const providerNodes = buildTopologyProviderNodes(byPrefix);
 
-  const surgeLines: string[] = [];
-  surgeLines.push("#!MANAGED-CONFIG https://127.0.0.1/aSingbox127.conf interval=0 strict=false");
-  surgeLines.push("# Generated by SingboxGUI V0 (Surge 5.10 Smart Transition Engine -> Sing-box 1.14.4 SOCKS5 Bridge)");
-  surgeLines.push(`# Naming Scheme: ${namingScheme} | Total SOCKS5 Endpoints: ${endpoints.length}`);
-  surgeLines.push("");
-  surgeLines.push("[Proxy]");
-  for (const ep of endpoints) {
-    surgeLines.push(ep.surgeProxyLine);
-  }
-
-  if (includeSurgeProxyGroups && providerNodes.length > 0) {
-    surgeLines.push("");
-    surgeLines.push("[Proxy Group]");
-    for (const pNode of providerNodes) {
-      const dirRegex =
-        namingScheme === "scheme_a_tilde"
-          ? `^${pNode.prefix}-`
-          : namingScheme === "scheme_b_dir"
-          ? `^DIR-${pNode.prefix}-`
-          : `^${pNode.prefix}@DIR-`;
-      surgeLines.push(
-        `Direct-${pNode.prefix} = smart, policy-regex-filter=${dirRegex}, include-other-group=false`
-      );
-    }
-    for (const edge of visualEdges) {
-      if (!edge.enabled || edge.generatedCount === 0) continue;
-      const chainRegex =
-        namingScheme === "scheme_a_tilde"
-          ? edge.hopCount === 2
-            ? `^CP2~${edge.fromPrefix}>${edge.viaPrefix}>${edge.toPrefix}~`
-            : `^CP1~${edge.fromPrefix}>${edge.toPrefix}~`
-          : namingScheme === "scheme_b_dir"
-          ? edge.hopCount === 2
-            ? `^CP2-${edge.fromPrefix}-${edge.viaPrefix}-${edge.toPrefix}-`
-            : `^CP1-${edge.fromPrefix}-${edge.toPrefix}-`
-          : edge.hopCount === 2
-          ? `^${edge.toPrefix}@CP2-${edge.fromPrefix}-${edge.viaPrefix}-`
-          : `^${edge.toPrefix}@CP1-${edge.fromPrefix}-`;
-      const groupTitle =
-        edge.hopCount === 2
-          ? `Chain2-${edge.fromPrefix}-${edge.viaPrefix}-${edge.toPrefix}`
-          : `Chain1-${edge.fromPrefix}-${edge.toPrefix}`;
-      surgeLines.push(
-        `${groupTitle} = smart, policy-regex-filter=${chainRegex}`
-      );
-    }
-  }
-
-  surgeLines.push("");
-  surgeLines.push("[Rule]");
-  surgeLines.push("# [Anti-Loop Critical] Allow sing-box outbound traffic to bypass Surge directly");
-  surgeLines.push("PROCESS-NAME,sing-box,DIRECT");
-  surgeLines.push("FINAL,DIRECT");
-  surgeLines.push("");
+  const surgeConfigText = buildSurgeConfigContent({
+    namingScheme,
+    endpoints,
+    providerNodes,
+    visualEdges,
+    includeSurgeProxyGroups,
+  });
 
   return {
     singboxConfig,
-    surgeConfigText: surgeLines.join("\n"),
+    surgeConfigText,
     endpoints,
     providerNodes,
     visualEdges,

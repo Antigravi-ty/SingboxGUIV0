@@ -39,6 +39,72 @@ export function getSurgeConfigPath(): string {
   return path.join(resolveAppConfigDir(), "aSingbox127.conf");
 }
 
+export function getUiConfigPath(): string {
+  return path.join(resolveAppConfigDir(), "ui-config.json");
+}
+
+export interface PersistedUiConfig {
+  listen_ip: string;
+  listen_port: number;
+  auto_detect_interface: boolean;
+  advanced_mode: boolean;
+  topbar_icon_style: "monochrome" | "real";
+  color_mode: "light" | "dark";
+  include_surge_proxy_groups: boolean;
+}
+
+export function loadUiConfigDisk(): PersistedUiConfig {
+  const defaultCfg: PersistedUiConfig = {
+    listen_ip: "127.0.0.1",
+    listen_port: 11400,
+    auto_detect_interface: true,
+    advanced_mode: false,
+    topbar_icon_style: "monochrome",
+    color_mode: "light",
+    include_surge_proxy_groups: true,
+  };
+  const cfgPath = getUiConfigPath();
+  try {
+    if (fs.existsSync(cfgPath)) {
+      const raw = fs.readFileSync(cfgPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      return {
+        listen_ip: String(parsed.listen_ip || defaultCfg.listen_ip),
+        listen_port: Number(parsed.listen_port) || defaultCfg.listen_port,
+        auto_detect_interface:
+          typeof parsed.auto_detect_interface === "boolean"
+            ? parsed.auto_detect_interface
+            : defaultCfg.auto_detect_interface,
+        advanced_mode: Boolean(parsed.advanced_mode),
+        topbar_icon_style:
+          parsed.topbar_icon_style === "real" ? "real" : "monochrome",
+        color_mode: parsed.color_mode === "dark" ? "dark" : "light",
+        include_surge_proxy_groups:
+          typeof parsed.include_surge_proxy_groups === "boolean"
+            ? parsed.include_surge_proxy_groups
+            : true,
+      };
+    } else {
+      fs.writeFileSync(cfgPath, JSON.stringify(defaultCfg, null, 2), "utf-8");
+    }
+  } catch {}
+  return defaultCfg;
+}
+
+export function saveUiConfigDisk(
+  partial: Partial<PersistedUiConfig>
+): PersistedUiConfig {
+  const current = loadUiConfigDisk();
+  const merged: PersistedUiConfig = {
+    ...current,
+    ...partial,
+  };
+  try {
+    fs.writeFileSync(getUiConfigPath(), JSON.stringify(merged, null, 2), "utf-8");
+  } catch {}
+  return merged;
+}
+
 export function ensureExecutablePermissions(filePath: string): void {
   if (process.platform !== "win32") {
     try {

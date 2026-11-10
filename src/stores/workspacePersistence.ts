@@ -1,4 +1,9 @@
 import {
+  loadPersistedUiConfig,
+  PersistedUiConfig,
+  savePersistedUiConfig,
+} from "../services/tauriGateway";
+import {
   ChainLinkRule,
   ChainNamingSchemeId,
   GeneratedProxyEndpoint,
@@ -21,6 +26,81 @@ import {
 export const STORAGE_SUBS_KEY = "singbox_gui_v0_subscriptions_v2";
 export const STORAGE_CHAINS_KEY = "singbox_gui_v0_chain_rules_v2";
 export const STORAGE_SCHEME_KEY = "singbox_gui_v0_naming_scheme";
+export const STORAGE_NETWORK_KEY = "singbox_gui_v0_network_params_v2";
+
+export interface StoredNetworkParams {
+  listenIp: string;
+  listenPort: number;
+  autoDetectInterface: boolean;
+  includeSurgeProxyGroups: boolean;
+}
+
+export function loadInitialNetworkParams(): StoredNetworkParams {
+  try {
+    const saved = localStorage.getItem(STORAGE_NETWORK_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === "object") {
+        return {
+          listenIp:
+            typeof parsed.listenIp === "string" && parsed.listenIp.trim()
+              ? parsed.listenIp.trim()
+              : "127.0.0.1",
+          listenPort:
+            typeof parsed.listenPort === "number" &&
+            parsed.listenPort >= 1024 &&
+            parsed.listenPort <= 65535
+              ? parsed.listenPort
+              : 11400,
+          autoDetectInterface:
+            typeof parsed.autoDetectInterface === "boolean"
+              ? parsed.autoDetectInterface
+              : true,
+          includeSurgeProxyGroups:
+            typeof parsed.includeSurgeProxyGroups === "boolean"
+              ? parsed.includeSurgeProxyGroups
+              : true,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    listenIp: "127.0.0.1",
+    listenPort: 11400,
+    autoDetectInterface: true,
+    includeSurgeProxyGroups: true,
+  };
+}
+
+export function saveNetworkParamsToStorage(params: StoredNetworkParams): void {
+  try {
+    localStorage.setItem(STORAGE_NETWORK_KEY, JSON.stringify(params));
+  } catch {
+    // ignore
+  }
+}
+
+export async function persistAgentFriendlyUiConfig(
+  config: PersistedUiConfig
+): Promise<string | null> {
+  try {
+    const res = await savePersistedUiConfig(config);
+    return res.path;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAgentFriendlyUiConfig(): Promise<PersistedUiConfig | null> {
+  try {
+    const res = await loadPersistedUiConfig();
+    return res?.config ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function loadInitialSubscriptions(): SubscriptionItem[] {
   try {

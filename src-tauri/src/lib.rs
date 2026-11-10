@@ -2,6 +2,7 @@ pub mod commands;
 pub mod paths;
 
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
@@ -15,6 +16,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let handle = app.handle();
+            let ui_cfg = commands::ui_config::load_ui_config_sync(handle);
+            let use_mono = !ui_cfg.topbar_icon_style.trim().eq_ignore_ascii_case("real");
+
             let show_item =
                 MenuItem::with_id(handle, "show_main", "Show SingboxGUI V0", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(handle)?;
@@ -58,9 +62,18 @@ pub fn run() {
                 });
 
             if let Some(default_icon) = app.default_window_icon() {
-                tray_builder = tray_builder.icon(default_icon.clone());
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.set_icon(default_icon.clone());
+                }
+                if use_mono {
+                    let (rgba, w, h) = commands::ui_config::build_monochrome_tray_icon_rgba();
+                    tray_builder = tray_builder
+                        .icon(Image::new_owned(rgba, w, h))
+                        .icon_as_template(true);
+                } else {
+                    tray_builder = tray_builder
+                        .icon(default_icon.clone())
+                        .icon_as_template(false);
                 }
             }
 
@@ -69,13 +82,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::subscription::fetch_subscription_url,
-            commands::singbox::check_binary_status,
-            commands::singbox::import_singbox_binary_cmd,
-            commands::singbox::open_config_folder_cmd,
+            commands::singbox_binary::check_binary_status,
+            commands::singbox_binary::import_singbox_binary_cmd,
+            commands::singbox_binary::open_config_folder_cmd,
             commands::singbox::validate_singbox_config_cmd,
             commands::singbox::start_singbox_service_cmd,
             commands::singbox::stop_singbox_service_cmd,
             commands::singbox::get_singbox_service_status_cmd,
+            commands::ui_config::get_ui_config_cmd,
+            commands::ui_config::save_ui_config_cmd,
+            commands::ui_config::set_tray_icon_style_cmd,
             commands::mitm::sniff_mitm_port,
             commands::mitm::toggle_mitm_listener,
             commands::mitm::check_port_availability,

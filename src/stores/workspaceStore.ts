@@ -1,16 +1,10 @@
 import { create } from "zustand";
 import {
-  DEFAULT_AUTO_UPDATE_INTERVAL,
   DEFAULT_CHAIN_LINK_RULES,
   DEFAULT_MITM_URL_REGEX_RULES,
   DEFAULT_SUBSCRIPTIONS,
-  DEFAULT_USER_AGENT_TYPE,
   USER_AGENT_PRESETS,
 } from "../config/defaultSubscriptions";
-import {
-  fetchSubscriptionRemoteOrFallback,
-  validateSingboxConfigWithCore,
-} from "../services/tauriGateway";
 import {
   ChainLinkRule,
   ChainNamingSchemeId,
@@ -30,19 +24,25 @@ import {
 } from "../types/singbox";
 import { SubscriptionItem, UserAgentType } from "../types/subscription";
 import { parseRawLogLine } from "../utils/ansiLogParser";
-import { getCurrentFormattedTime } from "../utils/subscriptionHelpers";
 import {
   clearWorkspaceStorage,
   executeFullCompilation,
   loadInitialChainRules,
   loadInitialNamingScheme,
+  loadInitialNetworkParams,
   loadInitialSubscriptions,
   saveChainRulesToStorage,
   saveNamingSchemeToStorage,
+  saveNetworkParamsToStorage,
   saveSubscriptionsToStorage,
 } from "./workspacePersistence";
-
-import { convertSubscriptionsToSingboxNodes } from "../utils/mihomoToSingboxConverter";
+import {
+  hydrateStoresFromDiskUiConfig,
+  performAddOrFetchSubscription,
+  performServiceStartOrStop,
+  performSingboxCheck,
+  syncUiConfigSnapshotToDisk,
+} from "./workspaceServiceActions";
 
 export type ActiveWorkspaceTab =
   | "topology"
@@ -104,6 +104,7 @@ interface WorkspaceState {
     autoDetectInterface?: boolean;
     includeSurgeProxyGroups?: boolean;
   }) => void;
+  hydrateUiConfigFromDisk: () => Promise<void>;
 
   chainRules: ChainLinkRule[];
   selectedChainRuleId: string | null;
@@ -124,7 +125,12 @@ interface WorkspaceState {
   providerNodes: TopologyProviderNode[];
   visualEdges: TopologyVisualEdge[];
   lastCheckResult: SingboxCheckResult | null;
+  isCheckingConfig: boolean;
+  isStartingService: boolean;
   runSingboxCheck: () => Promise<void>;
+  startOrStopServiceAction: (
+    action: "start" | "stop"
+  ) => Promise<{ ok: boolean; message: string }>;
   recomputePipeline: () => void;
 
   mitmRules: MitmUrlRegexRule[];
@@ -137,27 +143,33 @@ interface WorkspaceState {
   setRunningMode: (mode: RunningMode) => void;
   logs: ParsedLogEntry[];
   appendLog: (rawLine: string) => void;
+  appendLogsBatch: (rawLines: string[]) => void;
   clearLogs: () => void;
 }
 
 const initialSubs = loadInitialSubscriptions();
 const initialChains = loadInitialChainRules();
 const initialScheme = loadInitialNamingScheme();
+const initialNet = loadInitialNetworkParams();
+
 const initialCompiled = executeFullCompilation({
   subscriptions: initialSubs,
   namingScheme: initialScheme,
   securityPolicy: "follow_source_with_warning",
   excludedProtocols: [],
   chainRules: initialChains,
-  listenIp: "127.0.0.1",
-  listenPort: 11400,
+  listenIp: initialNet.listenIp,
+  listenPort: initialNet.listenPort,
   logLevel: "info",
-  autoDetectInterface: false,
-  includeSurgeProxyGroups: true,
+  autoDetectInterface: initialNet.autoDetectInterface,
+  includeSurgeProxyGroups: initialNet.includeSurgeProxyGroups,
 });
 
+let backgroundCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let nextLogSequenceId = 3;
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
-  activeTab: "topology",
+  activeTab: "console",
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   subscriptions: initialSubs,
@@ -167,165 +179,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   clearSubFeedback: () =>
     set({ subFeedback: null, lastFailedRawResponse: null }),
 
-  addOrFetchSubscription: async ({
-    prefix,
-    name,
-    url,
-    userAgentType = DEFAULT_USER_AGENT_TYPE,
-    rawContentOverride,
-  }) => {
-    const cleanPrefix = prefix
-      .replace(/[-~@]+$/, "")
-      .trim()
-      .slice(0, 8);
-    if (!cleanPrefix) {
-      set({
-        subFeedback: {
-          type: "danger",
-          message:
-            "Subscription prefix cannot be empty (e.g. LC, XF, YY).",
-        },
-      });
-      return false;
-    }
-
-    const trimmedUrl = (url || "").trim();
-    if (
-      !rawContentOverride &&
-      !trimmedUrl.startsWith("http://") &&
-      !trimmedUrl.startsWith("https://")
-    ) {
-      set({
-        subFeedback: {
-          type: "danger",
-          message:
-            "Please enter a valid remote Subscription URL starting with https:// or http:// (or use 'Import Local File' to load a local YAML/JSON/Base64 file).",
-        },
-      });
-      return false;
-    }
-
-    const uaPreset =
-      USER_AGENT_PRESETS.find((u) => u.id === userAgentType) ||
-      USER_AGENT_PRESETS[0];
-
-    set({
-      isFetchingSub: true,
-      subFeedback: null,
-      lastFailedRawResponse: null,
-    });
-    try {
-      let rawContent = rawContentOverride ?? "";
-      let userInfo = null;
-
-      if (!rawContent) {
-        const fetched = await fetchSubscriptionRemoteOrFallback(
-          trimmedUrl,
-          uaPreset.uaString
-        );
-        rawContent = fetched.body;
-        userInfo = fetched.userInfo;
-      }
-
-      if (!rawContent || !rawContent.trim()) {
-        throw new Error("Remote subscription returned an empty body (0 bytes).");
-      }
-
-      const format: "yaml" | "json" = rawContent.trim().startsWith("{")
-        ? "json"
-        : "yaml";
-
-      const newSub: SubscriptionItem = {
-        id: `sub_${Date.now()}_${cleanPrefix}`,
-        prefix: cleanPrefix,
-        name: name?.trim() || `${cleanPrefix} Subscription`,
-        url: trimmedUrl || `local://${cleanPrefix}.${format}`,
-        enabled: true,
-        userAgentType,
-        userAgentString: uaPreset.uaString,
-        filename: `${cleanPrefix}.${format}`,
-        format,
-        autoUpdateIntervalMinutes: DEFAULT_AUTO_UPDATE_INTERVAL,
-        lastUpdated: getCurrentFormattedTime(),
-        userInfo,
-        rawContent,
-      };
-
-      // Validate that at least 1 proxy node can be extracted before saving
-      const probe = convertSubscriptionsToSingboxNodes({
-        subscriptions: [newSub],
-        namingScheme: get().namingScheme,
-        securityPolicy: get().securityPolicy,
-        excludedProtocols: [],
-      });
-      const summary = probe.summaries[0];
-      if (!summary || summary.totalRawProxies === 0 || probe.directNodes.length === 0) {
-        const preview = rawContent.trim().slice(0, 180).replace(/\s+/g, " ");
-        set({
-          isFetchingSub: false,
-          lastFailedRawResponse: {
-            prefix: cleanPrefix,
-            url: trimmedUrl || `local://${cleanPrefix}`,
-            rawBody: rawContent,
-          },
-          subFeedback: {
-            type: "danger",
-            message: `Subscription [${cleanPrefix}] returned ${rawContent.length} bytes, but 0 valid proxy nodes were found. Make sure the URL returns Mihomo/Clash YAML (proxies:), Sing-box JSON (outbounds:), or Base64 share links. Preview: "${preview}"`,
-          },
-        });
-        get().appendLog(
-          `[ERROR][Converter] Subscription ${cleanPrefix} rejected: 0 proxy nodes parsed from ${rawContent.length} bytes.`
-        );
-        return false;
-      }
-
-      const existingIdx = get().subscriptions.findIndex(
-        (s) => s.prefix.toLowerCase() === cleanPrefix.toLowerCase()
-      );
-      const nextSubs = [...get().subscriptions];
-      if (existingIdx >= 0) {
-        nextSubs[existingIdx] = {
-          ...newSub,
-          id: nextSubs[existingIdx].id,
-        };
-      } else {
-        nextSubs.push(newSub);
-      }
-
-      saveSubscriptionsToStorage(nextSubs);
-
-      set({
-        subscriptions: nextSubs,
-        isFetchingSub: false,
-        lastFailedRawResponse: null,
-        subFeedback: {
-          type: "info",
-          message: `Imported subscription [${cleanPrefix}] (${probe.directNodes.length} / ${summary.totalRawProxies} nodes converted) with User-Agent '${uaPreset.uaString}' (Auto-Update = 0).`,
-        },
-      });
-      get().recomputePipeline();
-      get().appendLog(
-        `[INFO][Converter] Imported subscription ${cleanPrefix}: ${probe.directNodes.length} nodes (${rawContent.length} bytes) using UA ${uaPreset.uaString}`
-      );
-      return true;
-    } catch (err: any) {
-      set({
-        isFetchingSub: false,
-        subFeedback: {
-          type: "danger",
-          message: `Failed to fetch subscription [${cleanPrefix}]: ${
-            err?.message || String(err)
-          }`,
-        },
-      });
-      get().appendLog(
-        `[ERROR][Converter] Failed to fetch subscription ${cleanPrefix}: ${
-          err?.message || String(err)
-        }`
-      );
-      return false;
-    }
-  },
+  addOrFetchSubscription: (params) =>
+    performAddOrFetchSubscription(params, {
+      subscriptions: get().subscriptions,
+      namingScheme: get().namingScheme,
+      securityPolicy: get().securityPolicy,
+      setPartial: (patch) => set(patch as any),
+      recomputePipeline: () => get().recomputePipeline(),
+      appendLog: (line) => get().appendLog(line),
+    }),
 
   toggleSubscriptionEnabled: (id) => {
     const nextSubs = get().subscriptions.map((s) =>
@@ -370,7 +232,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       subFeedback: {
         type: "info",
         message:
-          "Loaded built-in sample subscriptions (LC, XF, YY) and chain proxy rules.",
+          "Loaded built-in sample subscriptions (LC, XF, YY, LT, SE) and chain proxy rules.",
       },
     });
     get().recomputePipeline();
@@ -417,22 +279,53 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().recomputePipeline();
   },
 
-  listenIp: "127.0.0.1",
-  listenPort: 11400,
+  listenIp: initialNet.listenIp,
+  listenPort: initialNet.listenPort,
   logLevel: "info",
-  autoDetectInterface: false,
-  includeSurgeProxyGroups: true,
+  autoDetectInterface: initialNet.autoDetectInterface,
+  includeSurgeProxyGroups: initialNet.includeSurgeProxyGroups,
   setNetworkParams: (patch) => {
-    set((s) => ({
-      listenIp: patch.listenIp ?? s.listenIp,
-      listenPort: patch.listenPort ?? s.listenPort,
-      logLevel: patch.logLevel ?? s.logLevel,
-      autoDetectInterface:
-        patch.autoDetectInterface ?? s.autoDetectInterface,
-      includeSurgeProxyGroups:
-        patch.includeSurgeProxyGroups ?? s.includeSurgeProxyGroups,
-    }));
+    const cur = get();
+    const nextListenIp = patch.listenIp ?? cur.listenIp;
+    const nextListenPort = patch.listenPort ?? cur.listenPort;
+    const nextLogLevel = patch.logLevel ?? cur.logLevel;
+    const nextAutoDetect =
+      patch.autoDetectInterface ?? cur.autoDetectInterface;
+    const nextIncludeGroups =
+      patch.includeSurgeProxyGroups ?? cur.includeSurgeProxyGroups;
+
+    set({
+      listenIp: nextListenIp,
+      listenPort: nextListenPort,
+      logLevel: nextLogLevel,
+      autoDetectInterface: nextAutoDetect,
+      includeSurgeProxyGroups: nextIncludeGroups,
+    });
+
+    const netSnapshot = {
+      listenIp: nextListenIp,
+      listenPort: nextListenPort,
+      autoDetectInterface: nextAutoDetect,
+      includeSurgeProxyGroups: nextIncludeGroups,
+    };
+    saveNetworkParamsToStorage(netSnapshot);
+    void syncUiConfigSnapshotToDisk(netSnapshot);
     get().recomputePipeline();
+  },
+
+  hydrateUiConfigFromDisk: async () => {
+    await hydrateStoresFromDiskUiConfig((netPatch) => {
+      const cur = get();
+      if (
+        cur.listenIp !== netPatch.listenIp ||
+        cur.listenPort !== netPatch.listenPort ||
+        cur.autoDetectInterface !== netPatch.autoDetectInterface ||
+        cur.includeSurgeProxyGroups !== netPatch.includeSurgeProxyGroups
+      ) {
+        set(netPatch);
+        get().recomputePipeline();
+      }
+    });
   },
 
   chainRules: initialChains,
@@ -495,6 +388,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   providerNodes: initialCompiled.providerNodes,
   visualEdges: initialCompiled.visualEdges,
   lastCheckResult: null,
+  isCheckingConfig: false,
+  isStartingService: false,
 
   recomputePipeline: () => {
     const s = get();
@@ -511,21 +406,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       includeSurgeProxyGroups: s.includeSurgeProxyGroups,
     });
     set(compiled);
-    get().runSingboxCheck();
+
+    if (backgroundCheckTimer) {
+      clearTimeout(backgroundCheckTimer);
+    }
+    backgroundCheckTimer = setTimeout(() => {
+      void get().runSingboxCheck();
+    }, 180);
   },
 
-  runSingboxCheck: async () => {
-    const s = get();
-    const jsonText = JSON.stringify(s.singboxConfig, null, 2);
-    const surgeText = s.surgeConfigText;
-    const res = await validateSingboxConfigWithCore(jsonText, surgeText);
-    set({ lastCheckResult: res });
-    if (res.serviceReloaded) {
-      get().appendLog(
-        `[INFO][Service] Dynamic config sync complete -> hot-reloaded running sing-box service (${res.singboxConfigPath}).`
-      );
-    }
-  },
+  runSingboxCheck: () =>
+    performSingboxCheck({
+      getSingboxConfig: () => get().singboxConfig,
+      getSurgeConfigText: () => get().surgeConfigText,
+      setPartial: (patch) => set(patch as any),
+      appendLog: (line) => get().appendLog(line),
+    }),
+
+  startOrStopServiceAction: (action) =>
+    performServiceStartOrStop(action, {
+      getSingboxConfig: () => get().singboxConfig,
+      getSurgeConfigText: () => get().surgeConfigText,
+      setPartial: (patch) => set(patch as any),
+      appendLog: (line) => get().appendLog(line),
+      appendLogsBatch: (lines) => get().appendLogsBatch(lines),
+    }),
 
   mitmRules: [],
   addMitmRule: (ruleInput) => {
@@ -556,18 +461,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       1
     ),
     parseRawLogLine(
-      "[INFO][Converter] Default subscription User-Agent set to clash-verge/v2.4.7; auto-update interval = 0 (manual only).",
+      "[INFO][Converter] Enhanced mode (route.auto_detect_interface = true) enabled by default; UI config synced to ui-config.json.",
       2
     ),
   ],
   appendLog: (rawLine) =>
     set((s) => {
       const next = [
-        ...s.logs.slice(-499),
-        parseRawLogLine(rawLine, s.logs.length + 1),
+        ...s.logs.slice(-599),
+        parseRawLogLine(rawLine, nextLogSequenceId++),
       ];
       return { logs: next };
     }),
+  appendLogsBatch: (rawLines) => {
+    if (!rawLines || rawLines.length === 0) return;
+    set((s) => {
+      const parsedBatch = rawLines
+        .filter((l) => typeof l === "string" && l.trim().length > 0)
+        .map((line) => parseRawLogLine(line, nextLogSequenceId++));
+      if (parsedBatch.length === 0) return {};
+      const combined = [...s.logs, ...parsedBatch].slice(-600);
+      return { logs: combined };
+    });
+  },
   clearLogs: () => set({ logs: [] }),
 }));
-

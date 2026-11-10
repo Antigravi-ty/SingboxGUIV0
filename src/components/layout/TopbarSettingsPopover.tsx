@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
+import { ToggleSwitch } from "@primer/react";
 import { FolderCode, Moon, Palette, Settings, Sun } from "lucide-react";
 import { TopbarIconStyle, useThemeStore } from "../../stores/themeStore";
+import { syncUiConfigSnapshotToDisk } from "../../stores/workspaceServiceActions";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { SingboxBrandIcon } from "./SingboxBrandIcon";
 
@@ -8,10 +10,17 @@ export const TopbarSettingsPopover: React.FC = () => {
   const {
     colorMode,
     topbarIconStyle,
+    advancedMode,
     setColorMode,
     setTopbarIconStyle,
+    setAdvancedMode,
   } = useThemeStore();
   const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
+  const listenIp = useWorkspaceStore((s) => s.listenIp);
+  const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const includeSurgeProxyGroups = useWorkspaceStore(
+    (s) => s.includeSurgeProxyGroups
+  );
   const setNetworkParams = useWorkspaceStore((s) => s.setNetworkParams);
 
   const [open, setOpen] = useState(false);
@@ -33,18 +42,36 @@ export const TopbarSettingsPopover: React.FC = () => {
 
   const handleSelectIconStyle = (style: TopbarIconStyle) => {
     setTopbarIconStyle(style);
+    void syncUiConfigSnapshotToDisk({
+      listenIp,
+      listenPort,
+      autoDetectInterface,
+      includeSurgeProxyGroups,
+    });
+  };
+
+  const handleToggleAdvanced = (next: boolean) => {
+    setAdvancedMode(next);
+    void syncUiConfigSnapshotToDisk({
+      listenIp,
+      listenPort,
+      autoDetectInterface,
+      includeSurgeProxyGroups,
+    });
   };
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
       <button
         type="button"
-        className={`primer-btn ${open ? "primer-btn-status-accent" : ""}`}
+        className={`primer-btn primer-btn-icon-only ${
+          open ? "primer-btn-status-accent" : ""
+        }`}
         onClick={() => setOpen((v) => !v)}
-        title="Appearance, Topbar Icon Style & Core Binary Settings"
+        aria-label="Settings"
+        title="Settings (System Tray Icon, Enhanced NIC Mode, UI Config & Theme)"
       >
-        <Settings size={13} />
-        <span>Settings</span>
+        <Settings size={14} />
       </button>
 
       {open && (
@@ -54,7 +81,7 @@ export const TopbarSettingsPopover: React.FC = () => {
             position: "absolute",
             top: "calc(100% + 6px)",
             right: 0,
-            width: 330,
+            width: 345,
             zIndex: 1300,
           }}
         >
@@ -68,9 +95,15 @@ export const TopbarSettingsPopover: React.FC = () => {
                 fontSize: 12,
               }}
             >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
                 <Palette size={13} />
-                <span>GUI Appearance &amp; Runtime Settings</span>
+                <span>System Tray, Enhanced Mode &amp; Settings</span>
               </span>
             </div>
           </div>
@@ -84,7 +117,7 @@ export const TopbarSettingsPopover: React.FC = () => {
               fontSize: 12,
             }}
           >
-            {/* 1. Topbar Brand Icon Style */}
+            {/* 1. System Tray / macOS Menu Bar Icon Style */}
             <div>
               <div
                 style={{
@@ -95,7 +128,7 @@ export const TopbarSettingsPopover: React.FC = () => {
                   justifyContent: "space-between",
                 }}
               >
-                <span>Topbar Icon Style (macOS Design)</span>
+                <span>System Tray / macOS Top Bar Icon</span>
                 <SingboxBrandIcon
                   styleMode={topbarIconStyle}
                   colorMode={colorMode}
@@ -103,6 +136,17 @@ export const TopbarSettingsPopover: React.FC = () => {
                 />
               </div>
               <div className="primer-segmented-control">
+                <button
+                  type="button"
+                  className={`primer-segmented-button ${
+                    topbarIconStyle === "monochrome"
+                      ? "primer-segmented-button-active"
+                      : ""
+                  }`}
+                  onClick={() => handleSelectIconStyle("monochrome")}
+                >
+                  Monochrome (Default)
+                </button>
                 <button
                   type="button"
                   className={`primer-segmented-button ${
@@ -114,17 +158,6 @@ export const TopbarSettingsPopover: React.FC = () => {
                 >
                   Real Color
                 </button>
-                <button
-                  type="button"
-                  className={`primer-segmented-button ${
-                    topbarIconStyle === "monochrome"
-                      ? "primer-segmented-button-active"
-                      : ""
-                  }`}
-                  onClick={() => handleSelectIconStyle("monochrome")}
-                >
-                  Monochrome (B&amp;W)
-                </button>
               </div>
               <div
                 style={{
@@ -135,13 +168,84 @@ export const TopbarSettingsPopover: React.FC = () => {
                 }}
               >
                 {topbarIconStyle === "monochrome"
-                  ? "Standardized macOS menu-bar template: crisp white fill in Light mode, deep black fill in Dark mode."
-                  : "Original 3D skeuomorphic cardboard box artwork."}
+                  ? "Applied to OS system tray / macOS menu bar as a native template icon (auto-adapts to macOS top bar)."
+                  : "Applied to OS system tray / macOS menu bar using full-color 3D box artwork."}
               </div>
             </div>
 
-            {/* 2. Theme Color Mode */}
-            <div>
+            {/* 2. Quick Toggle for route.auto_detect_interface (Enhanced Mode) */}
+            <div
+              style={{
+                paddingTop: 8,
+                borderTop: "1px solid var(--border-muted)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
+            >
+              <div>
+                <div
+                  id="settings-autodetect-label"
+                  style={{ fontWeight: 600, fontSize: 11.5 }}
+                >
+                  Enhanced Mode (<code>auto_detect_interface</code>)
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
+                  Auto-bind outbound traffic to physical NIC (default: ON)
+                </div>
+              </div>
+              <ToggleSwitch
+                size="small"
+                statusLabelPosition="end"
+                aria-labelledby="settings-autodetect-label"
+                checked={autoDetectInterface}
+                onChange={(checked: boolean) =>
+                  setNetworkParams({
+                    autoDetectInterface: checked,
+                  })
+                }
+              />
+            </div>
+
+            {/* 3. Advanced Workspace Mode Toggle */}
+            <div
+              style={{
+                paddingTop: 8,
+                borderTop: "1px solid var(--border-muted)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
+            >
+              <div>
+                <div
+                  id="settings-advanced-mode-label"
+                  style={{ fontWeight: 600, fontSize: 11.5 }}
+                >
+                  Advanced Mode (Full Tabs &amp; Telemetry)
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
+                  Show all 6 navigation tabs &amp; full header metadata
+                </div>
+              </div>
+              <ToggleSwitch
+                size="small"
+                statusLabelPosition="end"
+                aria-labelledby="settings-advanced-mode-label"
+                checked={advancedMode}
+                onChange={handleToggleAdvanced}
+              />
+            </div>
+
+            {/* 4. Theme Color Mode */}
+            <div
+              style={{
+                paddingTop: 8,
+                borderTop: "1px solid var(--border-muted)",
+              }}
+            >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
                 Workspace Theme Mode
               </div>
@@ -187,42 +291,7 @@ export const TopbarSettingsPopover: React.FC = () => {
               </div>
             </div>
 
-            {/* 3. Quick Toggle for route.auto_detect_interface */}
-            <div
-              style={{
-                paddingTop: 8,
-                borderTop: "1px solid var(--border-muted)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 11.5 }}>
-                  <code>auto_detect_interface</code>
-                </div>
-                <div style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
-                  Bind outbound traffic to physical NIC (Sing-box 1.14.4{" "}
-                  <code>route.auto_detect_interface</code>)
-                </div>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={autoDetectInterface}
-                className="primer-toggle-switch-btn"
-                onClick={() =>
-                  setNetworkParams({
-                    autoDetectInterface: !autoDetectInterface,
-                  })
-                }
-              >
-                <span className="primer-toggle-switch-knob" />
-              </button>
-            </div>
-
-            {/* 4. Application Support & Binary Placement Guide */}
+            {/* 5. Application Support & Agent-Friendly UI Config Storage */}
             <div
               style={{
                 padding: "8px 10px",
@@ -243,18 +312,14 @@ export const TopbarSettingsPopover: React.FC = () => {
                 }}
               >
                 <FolderCode size={12} />
-                <span>Application Support &amp; Binary Storage</span>
+                <span>Agent-Friendly Config &amp; Binary Directory</span>
               </div>
               <div style={{ color: "var(--fg-muted)" }}>
-                1. <code>~/Library/Application Support/com.antigravity.singboxguiv0/</code>{" "}
-                (Unified store for <code>sing-box</code>, <code>config.json</code> &amp;{" "}
-                <code>aSingbox127.conf</code>)
+                <code>~/Library/Application Support/com.antigravity.singboxguiv0/</code>
                 <br />
-                2. <code>./bin/sing-box</code> &amp; <code>./src-tauri/binaries/</code>{" "}
-                (Auto-imported into Application Support)
-                <br />
-                3. <code>/opt/homebrew/bin/sing-box</code> &amp;{" "}
-                <code>/usr/local/bin/sing-box</code>
+                Persists <code>ui-config.json</code> (port, IP, switches),{" "}
+                <code>config.json</code>, <code>aSingbox127.conf</code> &amp;{" "}
+                <code>sing-box</code>.
               </div>
             </div>
           </div>

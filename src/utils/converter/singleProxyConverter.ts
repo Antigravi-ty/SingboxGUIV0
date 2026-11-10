@@ -47,10 +47,20 @@ export function convertSingleMihomoProxy(params: {
   const sourceSkipCertVerify = Boolean(proxy["skip-cert-verify"]);
   const hasReality = Boolean(proxy["reality-opts"]);
   const hasEch = Boolean(proxy["ech-opts"]?.enable);
-  const certFingerprintPinValue = proxy.fingerprint
-    ? String(proxy.fingerprint)
+  const rawPin =
+    proxy.fingerprint ||
+    proxy["cert-sha256"] ||
+    proxy.pinSHA256 ||
+    proxy["certificate-public-key-sha256"] ||
+    proxy.tls?.certificate_public_key_sha256;
+  const certFingerprintPinValue = rawPin
+    ? Array.isArray(rawPin)
+      ? rawPin.map(String).join(",")
+      : String(rawPin)
     : undefined;
-  const hasCertFingerprintPin = Boolean(certFingerprintPinValue);
+  const hasCertFingerprintPin = Boolean(
+    certFingerprintPinValue && certFingerprintPinValue.trim().length > 0
+  );
 
   const { effectiveInsecure, overridden } = resolveEffectiveInsecure(
     pType,

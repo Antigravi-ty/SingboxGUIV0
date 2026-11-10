@@ -1,10 +1,10 @@
 import React, { useRef, useState } from "react";
+import { Spinner } from "@primer/react";
 import {
   Download,
   FileCode,
   FolderUp,
   RotateCcw,
-  Search,
   Trash2,
 } from "lucide-react";
 import {
@@ -13,8 +13,8 @@ import {
 } from "../../config/defaultSubscriptions";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { UserAgentType } from "../../types/subscription";
-import { searchJsonPaths } from "../../utils/subscriptionHelpers";
 import { SubscriptionItemCard } from "./SubscriptionItemCard";
+import { SubscriptionJsonInspectorPanel } from "./SubscriptionJsonInspectorPanel";
 
 export const SubscriptionManagerView: React.FC = () => {
   const subscriptions = useWorkspaceStore((s) => s.subscriptions);
@@ -33,14 +33,12 @@ export const SubscriptionManagerView: React.FC = () => {
   const clearAllSubscriptions = useWorkspaceStore(
     (s) => s.clearAllSubscriptions
   );
-  const singboxConfig = useWorkspaceStore((s) => s.singboxConfig);
 
   const [prefix, setPrefix] = useState<string>("");
   const [url, setUrl] = useState<string>("");
   const [userAgentType, setUserAgentType] = useState<UserAgentType>(
     DEFAULT_USER_AGENT_TYPE
   );
-  const [jsonSearchKeyword, setJsonSearchKeyword] = useState<string>("");
   const [showPasteModal, setShowPasteModal] = useState<boolean>(false);
   const [pastedRawText, setPastedRawText] = useState<string>("");
   const [showFailedRawModal, setShowFailedRawModal] = useState<boolean>(false);
@@ -101,12 +99,6 @@ export const SubscriptionManagerView: React.FC = () => {
     reader.readAsText(file);
     e.target.value = "";
   };
-
-  const jsonPathMatches = searchJsonPaths(
-    singboxConfig,
-    jsonSearchKeyword.trim() || "outbounds",
-    30
-  );
 
   return (
     <div className="view-container">
@@ -239,7 +231,7 @@ export const SubscriptionManagerView: React.FC = () => {
               disabled={isFetchingSub}
               onClick={handleFetchClick}
             >
-              <Download size={13} />
+              {isFetchingSub ? <Spinner size="small" /> : <Download size={13} />}
               <span>{isFetchingSub ? "Fetching..." : "Fetch & Convert"}</span>
             </button>
 
@@ -390,43 +382,7 @@ export const SubscriptionManagerView: React.FC = () => {
       </div>
 
       {/* JSONPath Inspector on Compiled Sing-box 1.14.4 Config */}
-      <div className="primer-box">
-        <div className="primer-box-header">
-          <span>Compiled Sing-box 1.14.4 JSONPath Inspector</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Search size={13} />
-            <input
-              className="primer-input"
-              style={{ width: 220 }}
-              value={jsonSearchKeyword}
-              onChange={(e) => setJsonSearchKeyword(e.target.value)}
-              placeholder="Search JSON key or value (e.g. detour)"
-            />
-          </div>
-        </div>
-        <div
-          className="primer-box-body"
-          style={{ maxHeight: 220, overflowY: "auto" }}
-        >
-          {jsonPathMatches.map((m) => (
-            <div
-              key={m.path}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "4px 0",
-                borderBottom: "1px dashed var(--border-muted)",
-                fontSize: 11.5,
-              }}
-            >
-              <code>{m.path}</code>
-              <span style={{ color: "var(--fg-muted)" }}>
-                {m.valuePreview}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <SubscriptionJsonInspectorPanel />
     </div>
   );
 };

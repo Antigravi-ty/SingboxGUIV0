@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Spinner } from "@primer/react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -19,8 +20,10 @@ import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { BinaryStatusInfo } from "../../types/singbox";
 
 export const CoreBinaryValidatorPanel: React.FC = () => {
-  const { lastCheckResult, runSingboxCheck, appendLog } = useWorkspaceStore();
-  const [isChecking, setIsChecking] = useState(false);
+  const lastCheckResult = useWorkspaceStore((s) => s.lastCheckResult);
+  const isCheckingConfig = useWorkspaceStore((s) => s.isCheckingConfig);
+  const runSingboxCheck = useWorkspaceStore((s) => s.runSingboxCheck);
+  const appendLog = useWorkspaceStore((s) => s.appendLog);
   const [isImporting, setIsImporting] = useState(false);
   const [binaryStatus, setBinaryStatus] = useState<BinaryStatusInfo | null>(
     null
@@ -36,26 +39,23 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
 
   useEffect(() => {
     refreshBinaryStatus();
-    runSingboxCheck();
+    if (!useWorkspaceStore.getState().lastCheckResult) {
+      void runSingboxCheck();
+    }
   }, [runSingboxCheck]);
 
   const handleRunSingboxCheck = async () => {
-    setIsChecking(true);
-    try {
-      refreshBinaryStatus();
-      await runSingboxCheck();
-      const latest = useWorkspaceStore.getState().lastCheckResult;
-      if (latest) {
-        appendLog(
-          latest.valid
-            ? latest.emptyWorkspace
-              ? `[WARN][sing-box] ${latest.commandOutput}`
-              : `[INFO][sing-box] ${latest.version} — ${latest.commandOutput}`
-            : `[ERROR][sing-box] ${latest.commandOutput}`
-        );
-      }
-    } finally {
-      setIsChecking(false);
+    refreshBinaryStatus();
+    await runSingboxCheck();
+    const latest = useWorkspaceStore.getState().lastCheckResult;
+    if (latest) {
+      appendLog(
+        latest.valid
+          ? latest.emptyWorkspace
+            ? `[WARN][sing-box] ${latest.commandOutput}`
+            : `[INFO][sing-box] ${latest.version} — ${latest.commandOutput}`
+          : `[ERROR][sing-box] ${latest.commandOutput}`
+      );
     }
   };
 
@@ -180,7 +180,11 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
             disabled={isImporting}
             title="Upload / Import sing-box executable directly into Application Support directory"
           >
-            <Upload size={13} />
+            {isImporting ? (
+              <Spinner size="small" srText={null} />
+            ) : (
+              <Upload size={13} />
+            )}
             {isImporting ? "Importing..." : "Import Binary"}
           </button>
           <button
@@ -195,10 +199,16 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
             type="button"
             className="btn btn-sm btn-primary"
             onClick={handleRunSingboxCheck}
-            disabled={isChecking}
+            disabled={isCheckingConfig}
           >
-            <Play size={14} />
-            {isChecking ? "Syncing & Checking..." : "Sync & Verify Config"}
+            {isCheckingConfig ? (
+              <Spinner size="small" srText={null} />
+            ) : (
+              <Play size={14} />
+            )}
+            {isCheckingConfig
+              ? "Syncing & Checking..."
+              : "Sync & Verify Config"}
           </button>
         </div>
       </div>

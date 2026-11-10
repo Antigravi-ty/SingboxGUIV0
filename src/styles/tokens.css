@@ -65,6 +65,15 @@
   --code-inline-bg: rgba(110, 118, 129, 0.25);
   --backdrop-bg: rgba(1, 4, 9, 0.75);
   --overlay-shadow: 0 8px 24px rgba(1, 4, 9, 0.65);
+  --fgColor-default: #e6edf3;
+  --fgColor-muted: #8b949e;
+  --controlTrack-bgColor-rest: #21262d;
+  --controlTrack-bgColor-hover: #30363d;
+  --controlTrack-borderColor-rest: #30363d;
+  --controlKnob-bgColor-rest: #0d1117;
+  --controlKnob-borderColor-rest: #6e7681;
+  --control-checked-bgColor-rest: #1f6feb;
+  --control-checked-bgColor-hover: #388bfd;
 }
 
 :root {
