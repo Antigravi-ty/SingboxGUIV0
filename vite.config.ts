@@ -11,7 +11,7 @@ export default defineConfig({
   cacheDir: "/tmp/singboxguiv0-vite",
   server: {
     host: "127.0.0.1",
-    port: 1420,
+    port: 1422,
     strictPort: true,
     watch: {
       ignored: ["**/src-tauri/**"],
