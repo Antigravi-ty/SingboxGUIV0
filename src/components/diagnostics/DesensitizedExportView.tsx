@@ -88,12 +88,12 @@ export const DesensitizedExportView: React.FC = () => {
   const maskedSniCount = directNodes.filter((n) => n.sni).length
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+    <div className="view-container">
       {/* Top Redaction Telemetry Banner */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
           gap: 'var(--space-3)',
         }}
       >
@@ -111,7 +111,7 @@ export const DesensitizedExportView: React.FC = () => {
             Masked UUIDs / Passwords / SS-2022 Keys
           </div>
           <div style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--success-fg)' }}>
-            {singboxConfig.outbounds.length - 1}
+            {Math.max(0, singboxConfig.outbounds.length - 1)}
           </div>
         </div>
 
@@ -128,7 +128,7 @@ export const DesensitizedExportView: React.FC = () => {
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)', marginBottom: '4px' }}>
             Sing-box 1.14.4 Schema Validity
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
             <span className="badge badge-success">sing-box check Ready</span>
             <span style={{ fontSize: '11px', color: 'var(--fg-muted)' }}>Format-Preserving</span>
           </div>
@@ -148,7 +148,7 @@ export const DesensitizedExportView: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <Shield size={18} style={{ color: 'var(--accent-fg)' }} />
+            <Shield size={18} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
             <div>
               <div style={{ fontWeight: 600, fontSize: 'var(--text-md)' }}>
                 Format-Preserving Desensitized Config Exporter
@@ -160,7 +160,7 @@ export const DesensitizedExportView: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <button
               className={`btn btn-sm ${!showRawUnmasked ? 'btn-primary' : ''}`}
               onClick={() => setShowRawUnmasked((prev) => !prev)}
@@ -202,37 +202,39 @@ export const DesensitizedExportView: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
             borderBottom: '1px solid var(--border-default)',
             paddingBottom: 'var(--space-2)',
             marginBottom: 'var(--space-3)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <button
               className={`btn btn-sm ${activeFormat === 'singbox_json' ? 'btn-primary' : ''}`}
               onClick={() => setActiveFormat('singbox_json')}
             >
               <FileJson size={14} />
-              Sing-box 1.14.4 (`config.json`)
+              Sing-box 1.14.4 (<code>config.json</code>)
             </button>
             <button
               className={`btn btn-sm ${activeFormat === 'mihomo_yaml' ? 'btn-primary' : ''}`}
               onClick={() => setActiveFormat('mihomo_yaml')}
             >
               <FileCode size={14} />
-              Source Mihomo YAML (`desensitized.yaml`)
+              Source Mihomo YAML (<code>desensitized.yaml</code>)
             </button>
             <button
               className={`btn btn-sm ${activeFormat === 'surge_conf' ? 'btn-primary' : ''}`}
               onClick={() => setActiveFormat('surge_conf')}
             >
               <Terminal size={14} />
-              Surge 5.10 SOCKS5 Bridge (`aSingbox127.conf`)
+              Surge 5.10 SOCKS5 Bridge (<code>aSingbox127.conf</code>)
             </button>
           </div>
 
           {activeFormat === 'mihomo_yaml' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)' }}>
                 Source Subscription:
               </span>
@@ -242,11 +244,15 @@ export const DesensitizedExportView: React.FC = () => {
                 value={selectedSubId}
                 onChange={(e) => setSelectedSubId(e.target.value)}
               >
-                {subscriptions.map((sub) => (
-                  <option key={sub.id} value={sub.id}>
-                    {sub.prefix} ({sub.name})
-                  </option>
-                ))}
+                {subscriptions.length === 0 ? (
+                  <option value="">No subscriptions imported yet</option>
+                ) : (
+                  subscriptions.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.prefix} ({sub.name})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           )}
@@ -254,10 +260,8 @@ export const DesensitizedExportView: React.FC = () => {
 
         {/* What gets preserved vs redacted */}
         <div
+          className="responsive-three-col-grid"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 'var(--space-2)',
             marginBottom: 'var(--space-3)',
             fontSize: 'var(--text-xs)',
           }}
@@ -265,38 +269,38 @@ export const DesensitizedExportView: React.FC = () => {
           <div
             style={{
               padding: '8px 10px',
-              borderRadius: 'var(--radius-sm)',
+              borderRadius: '6px',
               background: 'var(--bg-subtle)',
               border: '1px solid var(--border-muted)',
             }}
           >
             <strong style={{ color: 'var(--success-fg)' }}>Preserved for Debugging:</strong> Protocol type,
-            transport (`ws`/`grpc`/`http`), `flow`, `packet_encoding`, `server_ports` range format (`61000:62000`),
-            `utls.fingerprint`, `detour` chains, and `domain_resolver` tags.
+            transport (<code>ws</code>/<code>grpc</code>/<code>http</code>), <code>flow</code>, <code>packet_encoding</code>, <code>server_ports</code> range format (<code>61000:62000</code>),
+            <code>utls.fingerprint</code>, <code>detour</code> chains, and <code>domain_resolver</code> tags.
           </div>
           <div
             style={{
               padding: '8px 10px',
-              borderRadius: 'var(--radius-sm)',
+              borderRadius: '6px',
               background: 'var(--bg-subtle)',
               border: '1px solid var(--border-muted)',
             }}
           >
             <strong style={{ color: 'var(--accent-fg)' }}>Cryptographically Valid Placeholders:</strong> UUIDs are
-            replaced with deterministic v4 UUIDs, Reality `public_key` with valid 43-char base64url, and SS-2022 passwords
-            with valid 16/32-byte Base64 so `sing-box check` still passes!
+            replaced with deterministic v4 UUIDs, Reality <code>public_key</code> with valid 43-char base64url, and SS-2022 passwords
+            with valid 16/32-byte Base64 so <code>sing-box check</code> still passes!
           </div>
           <div
             style={{
               padding: '8px 10px',
-              borderRadius: 'var(--radius-sm)',
+              borderRadius: '6px',
               background: 'var(--bg-subtle)',
               border: '1px solid var(--border-muted)',
             }}
           >
-            <strong style={{ color: 'var(--warning-fg)' }}>Private DoH & Domain Suffix Preservation:</strong> Keeps
-            top-level structural suffixes (e.g., `.cnrcz.cn`, `.csnau.cn`) while masking private host prefixes and DoH UUID
-            paths (`/dns-query/00000000-...`).
+            <strong style={{ color: 'var(--warning-fg)' }}>Private DoH &amp; Domain Suffix Preservation:</strong> Keeps
+            top-level structural suffixes (e.g., <code>.cnrcz.cn</code>, <code>.csnau.cn</code>) while masking private host prefixes and DoH UUID
+            paths (<code>/dns-query/00000000-...</code>).
           </div>
         </div>
 
@@ -310,7 +314,7 @@ export const DesensitizedExportView: React.FC = () => {
             lineHeight: 1.5,
           }}
         >
-          {displayedContent}
+          {displayedContent || '# No subscription selected or imported yet.'}
         </pre>
       </div>
     </div>

@@ -9,25 +9,18 @@ import {
   Search,
   KeyRound,
   Route,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import {
+  generateSelfSignedCaPem,
+  sniffAvailableMitmPort,
   toggleMitmEngineListener,
   validateAndImportCaCertPem,
 } from '../../services/tauriGateway'
 import { evaluateUrlAgainstMitmRules } from '../../utils/ansiLogParser'
 import { MitmRouteActionType, ValidationStep } from '../../types/mitm'
-
-const DEFAULT_CERT_SAMPLE = `-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
------END CERTIFICATE-----`
-
-const DEFAULT_KEY_SAMPLE = `-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj
-MzEfYyjiWA4R4/M2bS1+fWIcPm15A6I3uvd1c0gnB4Xz2w4f4fE9V1e8lO8aG1C2
------END PRIVATE KEY-----`
 
 export const MitmRoutingView: React.FC = () => {
   const {
@@ -35,31 +28,36 @@ export const MitmRoutingView: React.FC = () => {
     addMitmRule,
     toggleMitmRule,
     deleteMitmRule,
+    loadSampleMitmRules,
     endpoints,
     appendLog,
   } = useWorkspaceStore()
 
   const [mitmRunning, setMitmRunning] = useState(false)
   const [mitmPort, setMitmPort] = useState(8080)
-  const [certPem, setCertPem] = useState(DEFAULT_CERT_SAMPLE)
-  const [keyPem, setKeyPem] = useState(DEFAULT_KEY_SAMPLE)
+  const [certPem, setCertPem] = useState('')
+  const [keyPem, setKeyPem] = useState('')
   const [validationSteps, setValidationSteps] = useState<ValidationStep[]>([])
+  const [certError, setCertError] = useState<string | null>(null)
+  const [certMetaSummary, setCertMetaSummary] = useState<string | null>(null)
   const [isValidating, setIsValidating] = useState(false)
+  const [isGeneratingCa, setIsGeneratingCa] = useState(false)
 
   // New URL Regex Rule form state
   const [newRuleName, setNewRuleName] = useState('')
   const [newRulePattern, setNewRulePattern] = useState('')
   const [newRuleAction, setNewRuleAction] =
     useState<MitmRouteActionType>('route_outbound')
-  const [newRuleTargetTag, setNewRuleTargetTag] = useState('YY-')
+  const [newRuleTargetTag, setNewRuleTargetTag] = useState('')
 
   // Live URL Regex Tester
-  const [testUrlInput, setTestUrlInput] = useState(
-    'https://api.openai.com/v1/chat/completions',
-  )
+  const [testUrlInput, setTestUrlInput] = useState('')
 
   const urlEvaluation = useMemo(
-    () => evaluateUrlAgainstMitmRules(testUrlInput, 'GET', mitmRules),
+    () =>
+      testUrlInput.trim()
+        ? evaluateUrlAgainstMitmRules(testUrlInput.trim(), 'GET', mitmRules)
+        : null,
     [testUrlInput, mitmRules],
   )
 
@@ -70,18 +68,63 @@ export const MitmRoutingView: React.FC = () => {
     appendLog(`[INFO][MITM] ${res.message}`)
   }
 
+  const handleSniffPort = async () => {
+    const port = await sniffAvailableMitmPort(mitmPort)
+    setMitmPort(port)
+    appendLog(`[INFO][MITM] Sniffed available local TCP port: ${port}`)
+  }
+
+  const handleGenerateRootCa = async () => {
+    setIsGeneratingCa(true)
+    setCertError(null)
+    try {
+      const pair = await generateSelfSignedCaPem()
+      setCertPem(pair.cert_pem)
+      setKeyPem(pair.key_pem)
+      const res = await validateAndImportCaCertPem(
+        pair.cert_pem,
+        pair.key_pem,
+        false,
+      )
+      setValidationSteps(res.steps)
+      setCertMetaSummary(
+        `Subject: ${res.subject} | Key: ${res.key_algorithm} | Valid until: ${res.not_after}`,
+      )
+      appendLog(
+        `[INFO][MITM] Generated & verified self-signed Root CA (${res.subject})`,
+      )
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      setCertError(msg)
+      appendLog(`[ERROR][MITM] Failed to generate Root CA: ${msg}`)
+    } finally {
+      setIsGeneratingCa(false)
+    }
+  }
+
   const handleRunCertValidation = async () => {
+    if (!certPem.trim() || !keyPem.trim()) {
+      setCertError(
+        'Please paste both a Certificate PEM and a Private Key PEM (or click "Generate Self-Signed CA" first).',
+      )
+      return
+    }
     setIsValidating(true)
+    setCertError(null)
     try {
       const res = await validateAndImportCaCertPem(certPem, keyPem, false)
       setValidationSteps(res.steps)
+      setCertMetaSummary(
+        `Subject: ${res.subject} | Key: ${res.key_algorithm} | Valid until: ${res.not_after}`,
+      )
       appendLog(
         `[INFO][MITM] Verified Root CA Certificate (${res.subject}, ${res.key_algorithm})`,
       )
     } catch (err: any) {
-      appendLog(
-        `[ERROR][MITM] Root CA validation error: ${err?.message || String(err)}`,
-      )
+      const msg = err?.message || String(err)
+      setCertError(msg)
+      setValidationSteps([])
+      appendLog(`[ERROR][MITM] Root CA validation error: ${msg}`)
     } finally {
       setIsValidating(false)
     }
@@ -100,6 +143,7 @@ export const MitmRoutingView: React.FC = () => {
     })
     setNewRuleName('')
     setNewRulePattern('')
+    setNewRuleTargetTag('')
   }
 
   const availablePrefixSuggestions = useMemo(() => {
@@ -111,7 +155,7 @@ export const MitmRoutingView: React.FC = () => {
   }, [endpoints])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+    <div className="view-container">
       {/* MITM Engine Header & Port Controls */}
       <div className="panel" style={{ padding: 'var(--space-4)' }}>
         <div
@@ -124,10 +168,10 @@ export const MitmRoutingView: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <Route size={18} style={{ color: 'var(--accent-fg)' }} />
+            <Route size={18} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
             <div>
               <div style={{ fontWeight: 600, fontSize: 'var(--text-md)' }}>
-                MITM Engine & Native URL Regex Routing (Surge Decoupling Layer)
+                MITM Engine &amp; Native URL Regex Routing (Surge Decoupling Layer)
               </div>
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)' }}>
                 Combines <code>sbagrepo</code> TLS SNI/HTTP sniffing and Root CA MITM inspection with regex-based outbound
@@ -136,7 +180,7 @@ export const MitmRoutingView: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)' }}>
               MITM Listen Port:
             </span>
@@ -148,6 +192,15 @@ export const MitmRoutingView: React.FC = () => {
               onChange={(e) => setMitmPort(Number(e.target.value) || 8080)}
             />
             <button
+              type="button"
+              className="btn btn-sm"
+              onClick={handleSniffPort}
+              title="Find an available local TCP port"
+            >
+              Auto-Sniff Port
+            </button>
+            <button
+              type="button"
               className={`btn btn-sm ${mitmRunning ? 'btn-danger' : 'btn-primary'}`}
               onClick={handleToggleMitm}
             >
@@ -159,33 +212,47 @@ export const MitmRoutingView: React.FC = () => {
       </div>
 
       {/* Two-Column Layout: URL Regex Routing Table + 4-Step CA Validator */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1.35fr 1fr',
-          gap: 'var(--space-4)',
-        }}
-      >
+      <div className="topology-two-col-grid">
         {/* Left: URL Regex Routing Rules & Live Tester */}
-        <div className="panel" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div
+          className="panel"
+          style={{
+            padding: 'var(--space-4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-3)',
+            minWidth: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
               URL Regex Routing Rules ({mitmRules.length})
             </span>
-            <span className="badge badge-accent">HTTP/HTTPS Host + Path Regex</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={loadSampleMitmRules}
+                title="Load built-in sample URL regex rules for testing"
+              >
+                <RotateCcw size={12} />
+                Load Sample Rules
+              </button>
+              <span className="badge badge-accent">HTTP/HTTPS Host + Path Regex</span>
+            </div>
           </div>
 
           {/* Live URL Matcher Box */}
           <div
             style={{
               padding: 'var(--space-3)',
-              borderRadius: 'var(--radius-md)',
+              borderRadius: '6px',
               background: 'var(--bg-subtle)',
               border: '1px solid var(--border-default)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <Search size={14} style={{ color: 'var(--accent-fg)' }} />
+              <Search size={14} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
               <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
                 Live URL Regex Routing Simulator
               </span>
@@ -196,11 +263,13 @@ export const MitmRoutingView: React.FC = () => {
               style={{ width: '100%', fontFamily: 'var(--font-mono)', marginBottom: '8px' }}
               value={testUrlInput}
               onChange={(e) => setTestUrlInput(e.target.value)}
-              placeholder="Enter full URL to test routing match..."
+              placeholder="Enter full URL to test routing match (e.g. https://api.openai.com/v1/chat/completions)..."
             />
             <div style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ color: 'var(--fg-muted)' }}>Matched Dispatch:</span>
-              {urlEvaluation.matched && urlEvaluation.matchedRule ? (
+              {!urlEvaluation ? (
+                <span className="badge badge-neutral">Enter a URL above to simulate rule evaluation</span>
+              ) : urlEvaluation.matched && urlEvaluation.matchedRule ? (
                 <span className="badge badge-success" style={{ fontFamily: 'var(--font-mono)' }}>
                   {urlEvaluation.matchedRule.name} -&gt; {urlEvaluation.actionSummary}
                 </span>
@@ -211,18 +280,11 @@ export const MitmRoutingView: React.FC = () => {
           </div>
 
           {/* Add New URL Regex Rule */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1.4fr 0.9fr 0.9fr auto',
-              gap: '6px',
-              alignItems: 'center',
-            }}
-          >
+          <div className="responsive-form-grid">
             <input
               type="text"
               className="text-input"
-              placeholder="Rule Name"
+              placeholder="Rule Name (e.g. OpenAI API)"
               value={newRuleName}
               onChange={(e) => setNewRuleName(e.target.value)}
             />
@@ -230,7 +292,7 @@ export const MitmRoutingView: React.FC = () => {
               type="text"
               className="text-input"
               style={{ fontFamily: 'var(--font-mono)' }}
-              placeholder="^https?://([a-z0-9-]+\.)?example\.com/"
+              placeholder="^https?://([a-z0-9-]+\.)?openai\.com/"
               value={newRulePattern}
               onChange={(e) => setNewRulePattern(e.target.value)}
             />
@@ -252,7 +314,7 @@ export const MitmRoutingView: React.FC = () => {
               className="text-input"
               list="mitm-outbound-suggestions"
               style={{ fontFamily: 'var(--font-mono)' }}
-              placeholder="Target Prefix/Tag"
+              placeholder="Target Prefix/Tag (e.g. YY-)"
               value={newRuleTargetTag}
               onChange={(e) => setNewRuleTargetTag(e.target.value)}
             />
@@ -261,95 +323,158 @@ export const MitmRoutingView: React.FC = () => {
                 <option key={item} value={item} />
               ))}
             </datalist>
-            <button className="btn btn-sm btn-primary" onClick={handleCreateRule}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={handleCreateRule}>
               <Plus size={14} />
-              Add
+              Add Rule
             </button>
           </div>
 
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>On</th>
-                <th>Name</th>
-                <th>URL Regex Pattern</th>
-                <th>Action</th>
-                <th>Target Outbound / Group</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {mitmRules.map((rule) => (
-                <tr key={rule.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onChange={() => toggleMitmRule(rule.id)}
-                    />
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{rule.name}</td>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                    {rule.urlRegex}
-                  </td>
-                  <td>
-                    <span
-                      className={`badge ${
-                        rule.actionType === 'route_outbound'
-                          ? 'badge-accent'
-                          : rule.actionType === 'reject_request'
-                            ? 'badge-danger'
-                            : 'badge-success'
-                      }`}
-                    >
-                      {rule.actionType}
-                    </span>
-                  </td>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    {rule.targetOutboundOrGroup}
-                  </td>
-                  <td>
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => deleteMitmRule(rule.id)}
-                      title="Delete rule"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </td>
+          <div className="primer-datatable-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>On</th>
+                  <th>Name</th>
+                  <th>URL Regex Pattern</th>
+                  <th>Action</th>
+                  <th>Target Outbound / Group</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {mitmRules.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '18px 12px', color: 'var(--fg-muted)' }}>
+                      No MITM URL regex rules configured yet. Add a rule above or click <strong>Load Sample Rules</strong>.
+                    </td>
+                  </tr>
+                ) : (
+                  mitmRules.map((rule) => (
+                    <tr key={rule.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={rule.enabled}
+                          onChange={() => toggleMitmRule(rule.id)}
+                        />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{rule.name}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                        {rule.urlRegex}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            rule.actionType === 'route_outbound'
+                              ? 'badge-accent'
+                              : rule.actionType === 'reject_request'
+                                ? 'badge-danger'
+                                : 'badge-success'
+                          }`}
+                        >
+                          {rule.actionType}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                        {rule.targetOutboundOrGroup}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => deleteMitmRule(rule.id)}
+                          title="Delete rule"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Right: 4-Step MITM Root CA Certificate Validator */}
-        <div className="panel" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div
+          className="panel"
+          style={{
+            padding: 'var(--space-4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-3)',
+            minWidth: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <KeyRound size={16} style={{ color: 'var(--accent-fg)' }} />
+              <KeyRound size={16} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
               <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
                 4-Step MITM Root CA Certificate Validator
               </span>
             </div>
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={handleRunCertValidation}
-              disabled={isValidating}
-            >
-              <Shield size={14} />
-              {isValidating ? 'Verifying...' : 'Run 4-Step Check'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleGenerateRootCa}
+                disabled={isGeneratingCa}
+                title="Generate a real self-signed EC P-256 Root CA certificate & private key via OpenSSL"
+              >
+                <Sparkles size={13} />
+                {isGeneratingCa ? 'Generating...' : 'Generate Self-Signed CA'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={handleRunCertValidation}
+                disabled={isValidating}
+              >
+                <Shield size={14} />
+                {isValidating ? 'Verifying...' : 'Run 4-Step Check'}
+              </button>
+            </div>
           </div>
 
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)' }}>
-            Validates PEM structure, X.509 BasicConstraints CA flag, validity window, and private key pairing before
-            mounting into the MITM engine.
+            Validates PEM structure, X.509 BasicConstraints CA flag, validity window, and cryptographic public/private key pairing before mounting into the MITM engine.
           </div>
+
+          {certError && (
+            <div
+              style={{
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'var(--danger-subtle)',
+                border: '1px solid var(--danger-fg)',
+                color: 'var(--danger-fg)',
+                fontSize: 'var(--text-xs)',
+              }}
+            >
+              {certError}
+            </div>
+          )}
+
+          {certMetaSummary && (
+            <div
+              style={{
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'var(--success-subtle)',
+                border: '1px solid var(--success-fg)',
+                color: 'var(--fg-default)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {certMetaSummary}
+            </div>
+          )}
 
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-              Root CA Certificate PEM (`cert.pem`)
+              Root CA Certificate PEM (<code>cert.pem</code>)
             </label>
             <textarea
               className="text-input"
@@ -359,6 +484,7 @@ export const MitmRoutingView: React.FC = () => {
                 fontFamily: 'var(--font-mono)',
                 fontSize: '11px',
               }}
+              placeholder="-----BEGIN CERTIFICATE----- ... (or click 'Generate Self-Signed CA' above)"
               value={certPem}
               onChange={(e) => setCertPem(e.target.value)}
             />
@@ -366,7 +492,7 @@ export const MitmRoutingView: React.FC = () => {
 
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-              Root CA Private Key PEM (`key.pem`)
+              Root CA Private Key PEM (<code>key.pem</code>)
             </label>
             <textarea
               className="text-input"
@@ -376,6 +502,7 @@ export const MitmRoutingView: React.FC = () => {
                 fontFamily: 'var(--font-mono)',
                 fontSize: '11px',
               }}
+              placeholder="-----BEGIN PRIVATE KEY----- ... (or click 'Generate Self-Signed CA' above)"
               value={keyPem}
               onChange={(e) => setKeyPem(e.target.value)}
             />
@@ -390,8 +517,10 @@ export const MitmRoutingView: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '6px',
                     padding: '8px 10px',
-                    borderRadius: 'var(--radius-sm)',
+                    borderRadius: '6px',
                     background: 'var(--bg-subtle)',
                     border: '1px solid var(--border-muted)',
                     fontSize: 'var(--text-xs)',
@@ -399,9 +528,9 @@ export const MitmRoutingView: React.FC = () => {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {step.passed ? (
-                      <CheckCircle2 size={14} style={{ color: 'var(--success-fg)' }} />
+                      <CheckCircle2 size={14} style={{ color: 'var(--success-fg)', flexShrink: 0 }} />
                     ) : (
-                      <XCircle size={14} style={{ color: 'var(--danger-fg)' }} />
+                      <XCircle size={14} style={{ color: 'var(--danger-fg)', flexShrink: 0 }} />
                     )}
                     <span style={{ fontWeight: 600 }}>
                       Step {step.step_number}: {step.name}
@@ -419,3 +548,4 @@ export const MitmRoutingView: React.FC = () => {
     </div>
   )
 }
+

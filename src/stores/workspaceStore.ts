@@ -42,6 +42,8 @@ import {
   saveSubscriptionsToStorage,
 } from "./workspacePersistence";
 
+import { convertSubscriptionsToSingboxNodes } from "../utils/mihomoToSingboxConverter";
+
 export type ActiveWorkspaceTab =
   | "topology"
   | "subscriptions"
@@ -57,6 +59,11 @@ interface WorkspaceState {
   subscriptions: SubscriptionItem[];
   isFetchingSub: boolean;
   subFeedback: { type: "info" | "warning" | "danger"; message: string } | null;
+  lastFailedRawResponse: {
+    prefix: string;
+    url: string;
+    rawBody: string;
+  } | null;
   clearSubFeedback: () => void;
   addOrFetchSubscription: (params: {
     prefix: string;
@@ -72,6 +79,7 @@ interface WorkspaceState {
   ) => void;
   deleteSubscriptionItem: (id: string) => void;
   resetDemoSubscriptions: () => void;
+  clearAllSubscriptions: () => void;
 
   namingScheme: ChainNamingSchemeId;
   setNamingScheme: (scheme: ChainNamingSchemeId) => void;
@@ -123,6 +131,7 @@ interface WorkspaceState {
   addMitmRule: (rule: Omit<MitmUrlRegexRule, "id">) => void;
   toggleMitmRule: (id: string) => void;
   deleteMitmRule: (id: string) => void;
+  loadSampleMitmRules: () => void;
 
   runningMode: RunningMode;
   setRunningMode: (mode: RunningMode) => void;
@@ -154,7 +163,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   subscriptions: initialSubs,
   isFetchingSub: false,
   subFeedback: null,
-  clearSubFeedback: () => set({ subFeedback: null }),
+  lastFailedRawResponse: null,
+  clearSubFeedback: () =>
+    set({ subFeedback: null, lastFailedRawResponse: null }),
 
   addOrFetchSubscription: async ({
     prefix,
@@ -171,7 +182,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({
         subFeedback: {
           type: "danger",
-          message: "Subscription prefix cannot be empty (e.g. LC, XF, YY).",
+          message:
+            "Subscription prefix cannot be empty (e.g. LC, XF, YY).",
+        },
+      });
+      return false;
+    }
+
+    const trimmedUrl = (url || "").trim();
+    if (
+      !rawContentOverride &&
+      !trimmedUrl.startsWith("http://") &&
+      !trimmedUrl.startsWith("https://")
+    ) {
+      set({
+        subFeedback: {
+          type: "danger",
+          message:
+            "Please enter a valid remote Subscription URL starting with https:// or http:// (or use 'Import Local File' to load a local YAML/JSON/Base64 file).",
         },
       });
       return false;
@@ -181,18 +209,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       USER_AGENT_PRESETS.find((u) => u.id === userAgentType) ||
       USER_AGENT_PRESETS[0];
 
-    set({ isFetchingSub: true, subFeedback: null });
+    set({
+      isFetchingSub: true,
+      subFeedback: null,
+      lastFailedRawResponse: null,
+    });
     try {
       let rawContent = rawContentOverride ?? "";
       let userInfo = null;
 
       if (!rawContent) {
         const fetched = await fetchSubscriptionRemoteOrFallback(
-          url.trim(),
+          trimmedUrl,
           uaPreset.uaString
         );
         rawContent = fetched.body;
         userInfo = fetched.userInfo;
+      }
+
+      if (!rawContent || !rawContent.trim()) {
+        throw new Error("Remote subscription returned an empty body (0 bytes).");
       }
 
       const format: "yaml" | "json" = rawContent.trim().startsWith("{")
@@ -203,7 +239,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         id: `sub_${Date.now()}_${cleanPrefix}`,
         prefix: cleanPrefix,
         name: name?.trim() || `${cleanPrefix} Subscription`,
-        url: url.trim() || `local://${cleanPrefix}.${format}`,
+        url: trimmedUrl || `local://${cleanPrefix}.${format}`,
         enabled: true,
         userAgentType,
         userAgentString: uaPreset.uaString,
@@ -214,6 +250,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         userInfo,
         rawContent,
       };
+
+      // Validate that at least 1 proxy node can be extracted before saving
+      const probe = convertSubscriptionsToSingboxNodes({
+        subscriptions: [newSub],
+        namingScheme: get().namingScheme,
+        securityPolicy: get().securityPolicy,
+        excludedProtocols: [],
+      });
+      const summary = probe.summaries[0];
+      if (!summary || summary.totalRawProxies === 0 || probe.directNodes.length === 0) {
+        const preview = rawContent.trim().slice(0, 180).replace(/\s+/g, " ");
+        set({
+          isFetchingSub: false,
+          lastFailedRawResponse: {
+            prefix: cleanPrefix,
+            url: trimmedUrl || `local://${cleanPrefix}`,
+            rawBody: rawContent,
+          },
+          subFeedback: {
+            type: "danger",
+            message: `Subscription [${cleanPrefix}] returned ${rawContent.length} bytes, but 0 valid proxy nodes were found. Make sure the URL returns Mihomo/Clash YAML (proxies:), Sing-box JSON (outbounds:), or Base64 share links. Preview: "${preview}"`,
+          },
+        });
+        get().appendLog(
+          `[ERROR][Converter] Subscription ${cleanPrefix} rejected: 0 proxy nodes parsed from ${rawContent.length} bytes.`
+        );
+        return false;
+      }
 
       const existingIdx = get().subscriptions.findIndex(
         (s) => s.prefix.toLowerCase() === cleanPrefix.toLowerCase()
@@ -233,14 +297,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({
         subscriptions: nextSubs,
         isFetchingSub: false,
+        lastFailedRawResponse: null,
         subFeedback: {
           type: "info",
-          message: `Imported subscription [${cleanPrefix}] with User-Agent '${uaPreset.uaString}' (Auto-Update = 0).`,
+          message: `Imported subscription [${cleanPrefix}] (${probe.directNodes.length} / ${summary.totalRawProxies} nodes converted) with User-Agent '${uaPreset.uaString}' (Auto-Update = 0).`,
         },
       });
       get().recomputePipeline();
       get().appendLog(
-        `[INFO][Converter] Imported subscription ${cleanPrefix} (${rawContent.length} bytes) using UA ${uaPreset.uaString}`
+        `[INFO][Converter] Imported subscription ${cleanPrefix}: ${probe.directNodes.length} nodes (${rawContent.length} bytes) using UA ${uaPreset.uaString}`
       );
       return true;
     } catch (err: any) {
@@ -253,6 +318,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }`,
         },
       });
+      get().appendLog(
+        `[ERROR][Converter] Failed to fetch subscription ${cleanPrefix}: ${
+          err?.message || String(err)
+        }`
+      );
       return false;
     }
   },
@@ -291,10 +361,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   resetDemoSubscriptions: () => {
-    clearWorkspaceStorage();
+    saveSubscriptionsToStorage(DEFAULT_SUBSCRIPTIONS);
+    saveChainRulesToStorage(DEFAULT_CHAIN_LINK_RULES);
     set({
       subscriptions: DEFAULT_SUBSCRIPTIONS,
       chainRules: DEFAULT_CHAIN_LINK_RULES,
+      selectedChainRuleId: DEFAULT_CHAIN_LINK_RULES[0]?.id || null,
+      subFeedback: {
+        type: "info",
+        message:
+          "Loaded built-in sample subscriptions (LC, XF, YY) and chain proxy rules.",
+      },
+    });
+    get().recomputePipeline();
+  },
+
+  clearAllSubscriptions: () => {
+    clearWorkspaceStorage();
+    set({
+      subscriptions: [],
+      chainRules: [],
+      selectedChainRuleId: null,
+      subFeedback: {
+        type: "info",
+        message: "Cleared all subscriptions and chain proxy rules.",
+      },
     });
     get().recomputePipeline();
   },
@@ -393,7 +484,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().recomputePipeline();
   },
 
-  regexTestQuery: "^YY-",
+  regexTestQuery: "",
   setRegexTestQuery: (query) => set({ regexTestQuery: query }),
 
   directNodes: initialCompiled.directNodes,
@@ -429,7 +520,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ lastCheckResult: res });
   },
 
-  mitmRules: DEFAULT_MITM_URL_REGEX_RULES,
+  mitmRules: [],
   addMitmRule: (ruleInput) => {
     const newRule: MitmUrlRegexRule = {
       ...ruleInput,
@@ -447,6 +538,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((s) => ({
       mitmRules: s.mitmRules.filter((r) => r.id !== id),
     })),
+  loadSampleMitmRules: () =>
+    set({ mitmRules: DEFAULT_MITM_URL_REGEX_RULES }),
 
   runningMode: "stopped",
   setRunningMode: (mode) => set({ runningMode: mode }),
@@ -459,10 +552,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       "[INFO][Converter] Default subscription User-Agent set to clash-verge/v2.4.7; auto-update interval = 0 (manual only).",
       2
     ),
-    parseRawLogLine(
-      "[INFO][Converter] Auto-detected custom authenticated DoH (dns-xf) from XF subscription proxy-server-nameserver.",
-      3
-    ),
   ],
   appendLog: (rawLine) =>
     set((s) => {
@@ -474,3 +563,4 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }),
   clearLogs: () => set({ logs: [] }),
 }));
+

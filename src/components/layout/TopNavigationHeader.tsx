@@ -91,7 +91,13 @@ export const TopNavigationHeader: React.FC = () => {
               color: "var(--fg-default)",
             }}
           >
-            <Activity size={17} style={{ color: "var(--fg-accent)" }} />
+            <img
+              src="/favicon.svg"
+              alt="Sing-box"
+              width={20}
+              height={20}
+              style={{ display: "block", flexShrink: 0 }}
+            />
             <span>SingboxGUI V0</span>
           </div>
 
@@ -163,39 +169,34 @@ export const TopNavigationHeader: React.FC = () => {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 14px",
-          backgroundColor: "var(--bg-canvas-subtle)",
-          borderBottom: "1px solid var(--border-default)",
-          overflowX: "auto",
-        }}
+      <nav
+        className="primer-header-secondary-tray"
+        aria-label="Workspace Tabs"
       >
-        {NAV_TABS.map((tab) => {
-          const IconComp = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`primer-btn ${
-                isActive ? "primer-btn-status-accent" : ""
-              }`}
-              style={{
-                fontWeight: isActive ? 600 : 500,
-                padding: "5px 11px",
-              }}
-            >
-              <IconComp size={13} />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+        <div className="primer-header-nav-tabs">
+          {NAV_TABS.map((tab) => {
+            const IconComp = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`primer-btn ${
+                  isActive ? "primer-btn-status-accent" : ""
+                }`}
+                style={{
+                  fontWeight: isActive ? 600 : 500,
+                  padding: "5px 11px",
+                }}
+              >
+                <IconComp size={13} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </header>
   );
 };

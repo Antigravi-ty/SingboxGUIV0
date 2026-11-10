@@ -15,6 +15,14 @@ export async function fetchSubscriptionRemoteOrFallback(
   userInfo: SubscriptionUserInfo | null;
   status: number;
 }> {
+  const trimmedUrl = (url || "").trim();
+  if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) {
+    throw new Error(
+      "Invalid URL: Subscription URL must start with http:// or https://"
+    );
+  }
+  const effectiveUa = (userAgent || "").trim() || "clash-verge/v2.4.7";
+
   try {
     const res = await invoke<{
       body: string;
@@ -22,8 +30,8 @@ export async function fetchSubscriptionRemoteOrFallback(
       status: number;
       userInfoHeader?: string;
     }>("fetch_subscription_url", {
-      url,
-      userAgent,
+      url: trimmedUrl,
+      userAgent: effectiveUa,
     });
     const headerVal =
       res.userInfoHeader ||
@@ -34,14 +42,54 @@ export async function fetchSubscriptionRemoteOrFallback(
       userInfo: parseSubscriptionUserInfo(headerVal),
       status: res.status,
     };
-  } catch {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+  } catch (tauriErr: any) {
+    // If Tauri returned an explicit backend error (not "invoke not available"), rethrow if appropriate
+    const errMsg = String(tauriErr?.message || tauriErr || "");
+    if (errMsg.includes("Subscription HTTP") || errMsg.includes("curl execution failed")) {
+      throw new Error(errMsg);
+    }
+
+    // Try Vite server-side curl proxy (/ __singbox_api/fetch-subscription) so CORS & custom User-Agent work in browser mode
     try {
-      const response = await fetch(url, {
+      const apiRes = await fetch("/__singbox_api/fetch-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmedUrl, userAgent: effectiveUa }),
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (data.status >= 400) {
+          throw new Error(`HTTP ${data.status} from remote subscription server`);
+        }
+        const headerVal =
+          data.userInfoHeader ||
+          data.headers?.["subscription-userinfo"] ||
+          data.headers?.["Subscription-Userinfo"];
+        return {
+          body: data.body || "",
+          userInfo: parseSubscriptionUserInfo(headerVal),
+          status: data.status || 200,
+        };
+      } else {
+        const errJson = await apiRes.json().catch(() => ({}));
+        if (errJson.error) {
+          throw new Error(errJson.error);
+        }
+      }
+    } catch (proxyErr: any) {
+      if (proxyErr?.message && !proxyErr.message.includes("Failed to fetch")) {
+        throw proxyErr;
+      }
+    }
+
+    // Final direct browser fetch fallback
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(trimmedUrl, {
         method: "GET",
         headers: {
-          "User-Agent": userAgent,
+          "User-Agent": effectiveUa,
         },
         signal: controller.signal,
       });
@@ -83,6 +131,23 @@ export async function validateSingboxConfigWithCore(
       checkedAt,
     };
   } catch {
+    try {
+      const apiRes = await fetch("/__singbox_api/singbox-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configContent: configJsonText }),
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        return {
+          valid: Boolean(data.valid),
+          version: data.version || "sing-box 1.14.4",
+          commandOutput: data.output || "",
+          checkedAt,
+        };
+      }
+    } catch {}
+
     try {
       const parsed = JSON.parse(configJsonText);
       const hasInbounds = Array.isArray(parsed.inbounds) && parsed.inbounds.length > 0;
@@ -148,6 +213,12 @@ export async function checkCoreBinaryStatus(): Promise<BinaryStatusInfo> {
   try {
     return await invoke<BinaryStatusInfo>("check_binary_status");
   } catch {
+    try {
+      const apiRes = await fetch("/__singbox_api/binary-status");
+      if (apiRes.ok) {
+        return await apiRes.json();
+      }
+    } catch {}
     return {
       imported: true,
       binary_name: "sing-box",
@@ -162,6 +233,17 @@ export async function sniffAvailableMitmPort(basePort: number): Promise<number> 
   try {
     return await invoke<number>("sniff_mitm_port", { basePort });
   } catch {
+    try {
+      const apiRes = await fetch("/__singbox_api/sniff-port", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ basePort }),
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (typeof data.port === "number") return data.port;
+      }
+    } catch {}
     return basePort + 1 <= 65535 ? basePort + 1 : 65535;
   }
 }
@@ -186,6 +268,27 @@ export async function toggleMitmEngineListener(
   }
 }
 
+export async function generateSelfSignedCaPem(): Promise<{
+  cert_pem: string;
+  key_pem: string;
+}> {
+  try {
+    return await invoke<{ cert_pem: string; key_pem: string }>(
+      "generate_self_signed_ca"
+    );
+  } catch {
+    const apiRes = await fetch("/__singbox_api/generate-ca", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!apiRes.ok) {
+      const errData = await apiRes.json().catch(() => ({}));
+      throw new Error(errData.error || "Failed to generate Root CA via OpenSSL");
+    }
+    return await apiRes.json();
+  }
+}
+
 export async function validateAndImportCaCertPem(
   certPem: string,
   keyPem: string,
@@ -199,7 +302,33 @@ export async function validateAndImportCaCertPem(
         store_in_keychain: storeInKeychain,
       },
     });
-  } catch {
+  } catch (tauriErr: any) {
+    const errMsg = String(tauriErr?.message || tauriErr || "");
+    if (errMsg.startsWith("Step 1 Failed") || errMsg.startsWith("Failed to parse")) {
+      throw new Error(errMsg);
+    }
+
+    try {
+      const apiRes = await fetch("/__singbox_api/validate-cert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cert_pem: certPem,
+          key_pem: keyPem,
+          store_in_keychain: storeInKeychain,
+        }),
+      });
+      const data = await apiRes.json();
+      if (!apiRes.ok) {
+        throw new Error(data.error || "X.509 Certificate validation failed");
+      }
+      return data as CertValidationResult;
+    } catch (apiErr: any) {
+      if (apiErr?.message && !apiErr.message.includes("Failed to fetch")) {
+        throw apiErr;
+      }
+    }
+
     const hasCertHeader = certPem.includes("-----BEGIN CERTIFICATE-----");
     const hasKeyHeader = keyPem.includes("PRIVATE KEY-----");
     if (!hasCertHeader || !hasKeyHeader) {
@@ -251,3 +380,4 @@ export async function validateAndImportCaCertPem(
     };
   }
 }
+

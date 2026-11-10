@@ -1,8 +1,4 @@
 import {
-  DEFAULT_CHAIN_LINK_RULES,
-  DEFAULT_SUBSCRIPTIONS,
-} from "../config/defaultSubscriptions";
-import {
   ChainLinkRule,
   ChainNamingSchemeId,
   GeneratedProxyEndpoint,
@@ -17,10 +13,13 @@ import {
 } from "../types/singbox";
 import { SubscriptionItem } from "../types/subscription";
 import { buildSingboxAndSurgePipeline } from "../utils/chainProxyEngine";
-import { convertSubscriptionsToSingboxNodes } from "../utils/mihomoToSingboxConverter";
+import {
+  convertSubscriptionsToSingboxNodes,
+  parseSubscriptionRawContentToDoc,
+} from "../utils/mihomoToSingboxConverter";
 
-export const STORAGE_SUBS_KEY = "singbox_gui_v0_subscriptions";
-export const STORAGE_CHAINS_KEY = "singbox_gui_v0_chain_rules";
+export const STORAGE_SUBS_KEY = "singbox_gui_v0_subscriptions_v2";
+export const STORAGE_CHAINS_KEY = "singbox_gui_v0_chain_rules_v2";
 export const STORAGE_SCHEME_KEY = "singbox_gui_v0_naming_scheme";
 
 export function loadInitialSubscriptions(): SubscriptionItem[] {
@@ -28,14 +27,24 @@ export function loadInitialSubscriptions(): SubscriptionItem[] {
     const saved = localStorage.getItem(STORAGE_SUBS_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item: SubscriptionItem) => {
+          if (!item || typeof item.rawContent !== "string") return false;
+          const doc = parseSubscriptionRawContentToDoc(item.rawContent);
+          if (!doc || typeof doc !== "object") return false;
+          const list = Array.isArray(doc.proxies)
+            ? doc.proxies
+            : Array.isArray(doc.outbounds)
+            ? doc.outbounds
+            : [];
+          return list.length > 0;
+        });
       }
     }
   } catch {
     // ignore
   }
-  return DEFAULT_SUBSCRIPTIONS;
+  return [];
 }
 
 export function saveSubscriptionsToStorage(subs: SubscriptionItem[]): void {
@@ -51,14 +60,14 @@ export function loadInitialChainRules(): ChainLinkRule[] {
     const saved = localStorage.getItem(STORAGE_CHAINS_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
   } catch {
     // ignore
   }
-  return DEFAULT_CHAIN_LINK_RULES;
+  return [];
 }
 
 export function saveChainRulesToStorage(rules: ChainLinkRule[]): void {

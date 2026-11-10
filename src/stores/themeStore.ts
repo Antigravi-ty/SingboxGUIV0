@@ -8,18 +8,18 @@ interface ThemeState {
   toggleColorMode: () => void;
 }
 
-const STORAGE_THEME_KEY = "singbox_gui_v0_theme";
+const STORAGE_THEME_KEY = "singbox_gui_v0_theme_v2";
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
-  colorMode: "dark",
+  colorMode: "light",
   initTheme: () => {
     try {
       const saved = localStorage.getItem(STORAGE_THEME_KEY) as ColorMode | null;
-      const mode: ColorMode = saved === "light" ? "light" : "dark";
+      const mode: ColorMode = saved === "dark" ? "dark" : "light";
       document.documentElement.setAttribute("data-color-mode", mode);
       set({ colorMode: mode });
     } catch {
-      document.documentElement.setAttribute("data-color-mode", "dark");
+      document.documentElement.setAttribute("data-color-mode", "light");
     }
   },
   toggleColorMode: () => {

@@ -25,7 +25,7 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
   }, [endpoints, regexTestQuery]);
 
   return (
-    <div className="primer-box">
+    <div className="primer-box" style={{ minWidth: 0 }}>
       <div className="primer-box-header">
         <span>Regex-Friendly Prefix Scheme &amp; Surge Policy Filter Tester</span>
         <span className="primer-label primer-label-success">
@@ -34,9 +34,17 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
       </div>
       <div
         className="primer-box-body"
-        style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          minWidth: 0,
+        }}
       >
-        <div className="primer-segmented-control">
+        <div
+          className="primer-segmented-control"
+          style={{ flexWrap: "wrap", height: "auto" }}
+        >
           {(
             [
               "scheme_a_tilde",
@@ -53,6 +61,7 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
                 className={`primer-segmented-button ${
                   active ? "primer-segmented-button-active" : ""
                 }`}
+                style={{ flex: "1 1 110px", whiteSpace: "normal" }}
                 onClick={() => setNamingScheme(schemeId)}
               >
                 {spec.shortBadge}
@@ -69,6 +78,8 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
             border: "1px solid var(--border-muted)",
             fontSize: 11.5,
             lineHeight: 1.5,
+            minWidth: 0,
+            overflowX: "auto",
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
@@ -80,24 +91,41 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "110px 1fr",
-              gap: "3px 8px",
+              gridTemplateColumns: "auto minmax(0, 1fr)",
+              gap: "4px 10px",
               fontSize: 11,
+              minWidth: 0,
             }}
           >
-            <span style={{ color: "var(--fg-muted)" }}>Direct (0-hop):</span>
-            <code>{currentSchemeSpec.directExample}</code>
-            <span style={{ color: "var(--fg-muted)" }}>1-Hop Chain:</span>
-            <code>{currentSchemeSpec.oneHopExample}</code>
-            <span style={{ color: "var(--fg-muted)" }}>2-Hop Chain:</span>
-            <code>{currentSchemeSpec.twoHopExample}</code>
-            <span style={{ color: "var(--fg-muted)" }}>Self-Hop:</span>
-            <code>{currentSchemeSpec.selfHopExample}</code>
+            <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+              Direct (0-hop):
+            </span>
+            <code style={{ wordBreak: "break-all" }}>
+              {currentSchemeSpec.directExample}
+            </code>
+            <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+              1-Hop Chain:
+            </span>
+            <code style={{ wordBreak: "break-all" }}>
+              {currentSchemeSpec.oneHopExample}
+            </code>
+            <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+              2-Hop Chain:
+            </span>
+            <code style={{ wordBreak: "break-all" }}>
+              {currentSchemeSpec.twoHopExample}
+            </code>
+            <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+              Self-Hop:
+            </span>
+            <code style={{ wordBreak: "break-all" }}>
+              {currentSchemeSpec.selfHopExample}
+            </code>
           </div>
         </div>
 
         {/* Interactive Regex Cheat-Sheet Pills */}
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div
             style={{
               fontSize: 11,
@@ -119,6 +147,12 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
                     ? "primer-btn-status-accent"
                     : ""
                 }`}
+                style={{
+                  whiteSpace: "normal",
+                  textAlign: "left",
+                  maxWidth: "100%",
+                  wordBreak: "break-word",
+                }}
                 onClick={() => setRegexTestQuery(item.pattern)}
                 title={item.explanation}
               >
@@ -135,11 +169,17 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
             display: "flex",
             alignItems: "center",
             gap: 8,
+            flexWrap: "wrap",
+            minWidth: 0,
           }}
         >
-          <Filter size={14} style={{ color: "var(--fg-accent)" }} />
+          <Filter
+            size={14}
+            style={{ color: "var(--fg-accent)", flexShrink: 0 }}
+          />
           <input
             className="primer-input"
+            style={{ flex: "1 1 180px", minWidth: 140 }}
             value={regexTestQuery}
             onChange={(e) => setRegexTestQuery(e.target.value)}
             placeholder="Enter policy-regex-filter pattern (e.g. ^YY- or ^CP1~LC>YY~)"
@@ -151,37 +191,55 @@ export const ChainRegexNamingTesterPanel: React.FC = () => {
 
         <div
           style={{
-            maxHeight: 165,
+            maxHeight: 200,
             overflowY: "auto",
+            overflowX: "auto",
             border: "1px solid var(--border-muted)",
             borderRadius: 6,
             padding: "6px 10px",
             backgroundColor: "var(--bg-canvas-inset)",
             fontSize: 11,
+            minWidth: 0,
           }}
         >
-          {regexMatchedEndpoints.length === 0 ? (
+          {endpoints.length === 0 ? (
+            <div style={{ color: "var(--fg-muted)" }}>
+              No endpoints generated yet. Import a subscription on the{" "}
+              <strong>Subscriptions</strong> tab (or click{" "}
+              <strong>Load Sample Topology</strong> above) to test regex
+              matching against live nodes.
+            </div>
+          ) : regexMatchedEndpoints.length === 0 ? (
             <div style={{ color: "var(--fg-muted)" }}>
               No endpoints matched regex <code>{regexTestQuery}</code>.
             </div>
           ) : (
-            regexMatchedEndpoints.slice(0, 40).map((ep) => (
+            regexMatchedEndpoints.slice(0, 60).map((ep) => (
               <div
                 key={ep.username}
                 style={{
                   display: "flex",
+                  alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "2px 0",
+                  gap: 10,
+                  padding: "3px 0",
                   borderBottom: "1px dashed var(--border-muted)",
+                  minWidth: "max-content",
                 }}
               >
-                <span>
+                <span style={{ whiteSpace: "nowrap" }}>
                   <strong style={{ color: "var(--fg-accent)" }}>
                     [{ep.username}]
                   </strong>{" "}
                   {ep.finalTag}
                 </span>
-                <span style={{ color: "var(--fg-muted)" }}>
+                <span
+                  style={{
+                    color: "var(--fg-muted)",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                >
                   {ep.hopCount === 0
                     ? "DIRECT"
                     : ep.isSelfHop

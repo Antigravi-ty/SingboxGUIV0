@@ -166,6 +166,40 @@ export const ChainTopologySvgCanvas: React.FC<ChainTopologySvgCanvasProps> = ({
             />
           ))}
 
+          {providerNodes.length === 0 && (
+            <g transform={`translate(365, ${bridgeCenterY})`}>
+              <rect
+                x={-230}
+                y={-34}
+                width={460}
+                height={68}
+                rx={8}
+                fill="var(--bg-canvas-default)"
+                stroke="var(--border-default)"
+                strokeDasharray="4 3"
+              />
+              <text
+                x={0}
+                y={-6}
+                textAnchor="middle"
+                fontSize={12}
+                fontWeight={600}
+                fill="var(--fg-default)"
+              >
+                No Subscription Provider Groups Imported Yet
+              </text>
+              <text
+                x={0}
+                y={14}
+                textAnchor="middle"
+                fontSize={10.5}
+                fill="var(--fg-muted)"
+              >
+                Import a subscription (or click &quot;Load Sample Topology&quot;) to render Stage 1–4 lanes
+              </text>
+            </g>
+          )}
+
           {/* Direct Baseline Connections from Exit Stage -> SOCKS5 Bridge */}
           {providerNodes.map((pNode) => {
             const y = rowMap.get(pNode.prefix) || 80;

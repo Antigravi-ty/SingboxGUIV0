@@ -98,14 +98,16 @@
   min-height: 0;
 }
 
-.primer-datatable {
+.primer-datatable,
+.data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
 }
 
-.primer-datatable thead th {
+.primer-datatable thead th,
+.data-table thead th {
   position: sticky;
   top: 0;
   z-index: 5;
@@ -120,7 +122,9 @@
 }
 
 .primer-datatable tbody td,
-.primer-datatable tbody th[scope="row"] {
+.primer-datatable tbody th[scope="row"],
+.data-table tbody td,
+.data-table tbody th[scope="row"] {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-muted);
   vertical-align: middle;
@@ -129,15 +133,19 @@
 }
 
 .primer-datatable tbody tr:last-child td,
-.primer-datatable tbody tr:last-child th[scope="row"] {
+.primer-datatable tbody tr:last-child th[scope="row"],
+.data-table tbody tr:last-child td,
+.data-table tbody tr:last-child th[scope="row"] {
   border-bottom: none;
 }
 
-.primer-datatable-row {
+.primer-datatable-row,
+.data-table tbody tr {
   transition: background-color 0.1s ease;
 }
 
-.primer-datatable-row:hover {
+.primer-datatable-row:hover,
+.data-table tbody tr:hover {
   background-color: var(--bg-canvas-subtle);
 }
 

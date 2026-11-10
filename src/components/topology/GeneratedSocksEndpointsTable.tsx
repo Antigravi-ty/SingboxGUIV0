@@ -32,41 +32,59 @@ export const GeneratedSocksEndpointsTable: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {endpoints.map((ep) => (
-              <tr key={ep.username} className="primer-datatable-row">
-                <td>
-                  <code>{ep.username}:0</code>
-                </td>
-                <td>
-                  <span
-                    className={`primer-label ${
-                      ep.hopCount === 0
-                        ? "primer-label-neutral"
-                        : ep.hopCount === 2
-                        ? "primer-label-done"
-                        : ep.isSelfHop
-                        ? "primer-label-sponsors"
-                        : "primer-label-accent"
-                    }`}
-                  >
-                    {ep.hopCount === 0
-                      ? "0-Hop Direct"
-                      : ep.isSelfHop
-                      ? "1-Hop Self-Relay"
-                      : `${ep.hopCount}-Hop Chain`}
-                  </span>
-                </td>
-                <td style={{ fontWeight: 600 }}>{ep.finalTag}</td>
-                <td>
-                  <code>{ep.hopTags.join(" -> ")}</code>
-                </td>
-                <td>
-                  <span className="primer-label primer-label-success">
-                    {ep.protocolChain.join(" => ")}
-                  </span>
+            {endpoints.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  style={{
+                    textAlign: "center",
+                    padding: "20px 12px",
+                    color: "var(--fg-muted)",
+                  }}
+                >
+                  No SOCKS5 endpoints generated yet. Import a subscription on the{" "}
+                  <strong>Subscriptions &amp; Mihomo Converter</strong> tab (or
+                  click <strong>Load Sample Topology</strong> above) to compile
+                  Sing-box 1.14.4 outbounds.
                 </td>
               </tr>
-            ))}
+            ) : (
+              endpoints.map((ep) => (
+                <tr key={ep.username} className="primer-datatable-row">
+                  <td>
+                    <code>{ep.username}:0</code>
+                  </td>
+                  <td>
+                    <span
+                      className={`primer-label ${
+                        ep.hopCount === 0
+                          ? "primer-label-neutral"
+                          : ep.hopCount === 2
+                          ? "primer-label-done"
+                          : ep.isSelfHop
+                          ? "primer-label-sponsors"
+                          : "primer-label-accent"
+                      }`}
+                    >
+                      {ep.hopCount === 0
+                        ? "0-Hop Direct"
+                        : ep.isSelfHop
+                        ? "1-Hop Self-Relay"
+                        : `${ep.hopCount}-Hop Chain`}
+                    </span>
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{ep.finalTag}</td>
+                  <td>
+                    <code>{ep.hopTags.join(" -> ")}</code>
+                  </td>
+                  <td>
+                    <span className="primer-label primer-label-success">
+                      {ep.protocolChain.join(" => ")}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

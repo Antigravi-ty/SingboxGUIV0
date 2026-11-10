@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { ChainExpansionMode } from "../../types/chainProxy";
@@ -12,6 +12,7 @@ export const ChainRuleBuilderPanel: React.FC = () => {
   const addChainRule = useWorkspaceStore((s) => s.addChainRule);
   const toggleChainRule = useWorkspaceStore((s) => s.toggleChainRule);
   const deleteChainRule = useWorkspaceStore((s) => s.deleteChainRule);
+  const setActiveTab = useWorkspaceStore((s) => s.setActiveTab);
 
   const availablePrefixes = useMemo(
     () => providerNodes.map((p) => p.prefix),
@@ -19,18 +20,36 @@ export const ChainRuleBuilderPanel: React.FC = () => {
   );
 
   const [newHopCount, setNewHopCount] = useState<1 | 2>(1);
-  const [newEntryPrefix, setNewEntryPrefix] = useState<string>("LC");
-  const [newEntryFilter, setNewEntryFilter] =
-    useState<string>("AWS-JP-1|JP|日本");
-  const [newMiddlePrefix, setNewMiddlePrefix] = useState<string>("LT");
-  const [newMiddleFilter, setNewMiddleFilter] = useState<string>("SG|新加坡");
-  const [newExitPrefix, setNewExitPrefix] = useState<string>("YY");
-  const [newExitFilter, setNewExitFilter] = useState<string>(".*");
+  const [newEntryPrefix, setNewEntryPrefix] = useState<string>("");
+  const [newEntryFilter, setNewEntryFilter] = useState<string>("");
+  const [newMiddlePrefix, setNewMiddlePrefix] = useState<string>("");
+  const [newMiddleFilter, setNewMiddleFilter] = useState<string>("");
+  const [newExitPrefix, setNewExitPrefix] = useState<string>("");
+  const [newExitFilter, setNewExitFilter] = useState<string>("");
   const [newExpansionMode, setNewExpansionMode] =
     useState<ChainExpansionMode>("primary_entry_to_all_exits");
   const [newMaxNodes, setNewMaxNodes] = useState<number>(20);
 
+  useEffect(() => {
+    if (availablePrefixes.length > 0) {
+      if (!newEntryPrefix || !availablePrefixes.includes(newEntryPrefix)) {
+        setNewEntryPrefix(availablePrefixes[0]);
+      }
+      if (!newMiddlePrefix || !availablePrefixes.includes(newMiddlePrefix)) {
+        setNewMiddlePrefix(availablePrefixes[Math.min(1, availablePrefixes.length - 1)]);
+      }
+      if (!newExitPrefix || !availablePrefixes.includes(newExitPrefix)) {
+        setNewExitPrefix(availablePrefixes[availablePrefixes.length - 1]);
+      }
+    } else {
+      setNewEntryPrefix("");
+      setNewMiddlePrefix("");
+      setNewExitPrefix("");
+    }
+  }, [availablePrefixes, newEntryPrefix, newMiddlePrefix, newExitPrefix]);
+
   const handleAddRule = () => {
+    if (!newEntryPrefix || !newExitPrefix) return;
     const isSelf = newHopCount === 1 && newEntryPrefix === newExitPrefix;
     const ruleTitle =
       newHopCount === 2
@@ -50,12 +69,12 @@ export const ChainRuleBuilderPanel: React.FC = () => {
       enabled: true,
       hopCount: newHopCount,
       entryPrefix: newEntryPrefix,
-      entryNodeFilterRegex: newEntryFilter || ".*",
+      entryNodeFilterRegex: newEntryFilter.trim() || ".*",
       middlePrefix: newHopCount === 2 ? newMiddlePrefix : undefined,
       middleNodeFilterRegex:
-        newHopCount === 2 ? newMiddleFilter || ".*" : undefined,
+        newHopCount === 2 ? newMiddleFilter.trim() || ".*" : undefined,
       exitPrefix: newExitPrefix,
-      exitNodeFilterRegex: newExitFilter || ".*",
+      exitNodeFilterRegex: newExitFilter.trim() || ".*",
       expansionMode: newExpansionMode,
       maxGeneratedNodes: newMaxNodes,
     });
@@ -75,66 +94,70 @@ export const ChainRuleBuilderPanel: React.FC = () => {
         className="primer-box-body"
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-            gap: 8,
-          }}
-        >
-          <div>
-            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-              Hop Count
-            </label>
-            <select
-              className="primer-input"
-              value={newHopCount}
-              onChange={(e) => setNewHopCount(Number(e.target.value) as 1 | 2)}
+        {availablePrefixes.length === 0 ? (
+          <div
+            style={{
+              padding: "12px 14px",
+              borderRadius: 6,
+              backgroundColor: "var(--bg-canvas-subtle)",
+              border: "1px dashed var(--border-default)",
+              color: "var(--fg-muted)",
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>
+              No subscription groups imported yet. Import a Mihomo YAML /
+              Sing-box JSON / Base64 subscription first to build inter-group or
+              self-relay chain rules.
+            </span>
+            <button
+              type="button"
+              className="primer-btn primer-btn-primary"
+              onClick={() => setActiveTab("subscriptions")}
             >
-              <option value={1}>1-Hop (Entry -&gt; Exit or Self)</option>
-              <option value={2}>2-Hop (Entry -&gt; Transit -&gt; Exit)</option>
-            </select>
+              Go to Subscriptions
+            </button>
           </div>
-
-          <div>
-            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-              Entry Provider (Hop 1)
-            </label>
-            <select
-              className="primer-input"
-              value={newEntryPrefix}
-              onChange={(e) => setNewEntryPrefix(e.target.value)}
+        ) : (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                gap: 8,
+              }}
             >
-              {availablePrefixes.map((p) => (
-                <option key={p} value={p}>
-                  {p} Group
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-              Entry Node Regex
-            </label>
-            <input
-              className="primer-input"
-              value={newEntryFilter}
-              onChange={(e) => setNewEntryFilter(e.target.value)}
-              placeholder="e.g. JP|日本"
-            />
-          </div>
-
-          {newHopCount === 2 && (
-            <>
               <div>
                 <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-                  Transit Provider (Hop 2)
+                  Hop Count
                 </label>
                 <select
                   className="primer-input"
-                  value={newMiddlePrefix}
-                  onChange={(e) => setNewMiddlePrefix(e.target.value)}
+                  value={newHopCount}
+                  onChange={(e) =>
+                    setNewHopCount(Number(e.target.value) as 1 | 2)
+                  }
+                >
+                  <option value={1}>1-Hop (Entry -&gt; Exit or Self)</option>
+                  <option value={2}>
+                    2-Hop (Entry -&gt; Transit -&gt; Exit)
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                  Entry Provider (Hop 1)
+                </label>
+                <select
+                  className="primer-input"
+                  value={newEntryPrefix}
+                  onChange={(e) => setNewEntryPrefix(e.target.value)}
                 >
                   {availablePrefixes.map((p) => (
                     <option key={p} value={p}>
@@ -143,104 +166,145 @@ export const ChainRuleBuilderPanel: React.FC = () => {
                   ))}
                 </select>
               </div>
+
               <div>
                 <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-                  Transit Node Regex
+                  Entry Node Regex
                 </label>
                 <input
                   className="primer-input"
-                  value={newMiddleFilter}
-                  onChange={(e) => setNewMiddleFilter(e.target.value)}
-                  placeholder="e.g. SG|新加坡"
+                  value={newEntryFilter}
+                  onChange={(e) => setNewEntryFilter(e.target.value)}
+                  placeholder=".* (or JP|日本)"
                 />
               </div>
-            </>
-          )}
 
-          <div>
-            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-              Exit Provider (Landing)
-            </label>
-            <select
-              className="primer-input"
-              value={newExitPrefix}
-              onChange={(e) => setNewExitPrefix(e.target.value)}
+              {newHopCount === 2 && (
+                <>
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                      Transit Provider (Hop 2)
+                    </label>
+                    <select
+                      className="primer-input"
+                      value={newMiddlePrefix}
+                      onChange={(e) => setNewMiddlePrefix(e.target.value)}
+                    >
+                      {availablePrefixes.map((p) => (
+                        <option key={p} value={p}>
+                          {p} Group
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                      Transit Node Regex
+                    </label>
+                    <input
+                      className="primer-input"
+                      value={newMiddleFilter}
+                      onChange={(e) => setNewMiddleFilter(e.target.value)}
+                      placeholder=".* (or SG|新加坡)"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                  Exit Provider (Landing)
+                </label>
+                <select
+                  className="primer-input"
+                  value={newExitPrefix}
+                  onChange={(e) => setNewExitPrefix(e.target.value)}
+                >
+                  {availablePrefixes.map((p) => (
+                    <option key={p} value={p}>
+                      {p}{" "}
+                      {p === newEntryPrefix && newHopCount === 1
+                        ? "(Self-Hop)"
+                        : "Group"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                  Exit Node Regex
+                </label>
+                <input
+                  className="primer-input"
+                  value={newExitFilter}
+                  onChange={(e) => setNewExitFilter(e.target.value)}
+                  placeholder=".* (or US|美国)"
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
             >
-              {availablePrefixes.map((p) => (
-                <option key={p} value={p}>
-                  {p}{" "}
-                  {p === newEntryPrefix && newHopCount === 1
-                    ? "(Self-Hop)"
-                    : "Group"}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  flex: "1 1 auto",
+                }}
+              >
+                <select
+                  className="primer-input"
+                  style={{ width: "auto", minWidth: 180, flex: "1 1 180px" }}
+                  value={newExpansionMode}
+                  onChange={(e) =>
+                    setNewExpansionMode(e.target.value as ChainExpansionMode)
+                  }
+                >
+                  <option value="primary_entry_to_all_exits">
+                    Primary Entry -&gt; All Matched Exits
+                  </option>
+                  <option value="round_robin_pairing">
+                    Round-Robin 1:1 Pairing
+                  </option>
+                  <option value="full_cartesian">
+                    Full Cartesian Matrix (M × N)
+                  </option>
+                </select>
+                <input
+                  type="number"
+                  className="primer-input"
+                  style={{ width: 85 }}
+                  min={1}
+                  max={200}
+                  value={newMaxNodes}
+                  onChange={(e) =>
+                    setNewMaxNodes(Math.max(1, Number(e.target.value) || 20))
+                  }
+                  title="Max SOCKS5 endpoints generated for this chain rule"
+                />
+              </div>
 
-          <div>
-            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-              Exit Node Regex
-            </label>
-            <input
-              className="primer-input"
-              value={newExitFilter}
-              onChange={(e) => setNewExitFilter(e.target.value)}
-              placeholder="e.g. US|美国 or .*"
-            />
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select
-              className="primer-input"
-              style={{ width: 210 }}
-              value={newExpansionMode}
-              onChange={(e) =>
-                setNewExpansionMode(e.target.value as ChainExpansionMode)
-              }
-            >
-              <option value="primary_entry_to_all_exits">
-                Primary Entry -&gt; All Matched Exits
-              </option>
-              <option value="round_robin_pairing">
-                Round-Robin 1:1 Pairing
-              </option>
-              <option value="full_cartesian">
-                Full Cartesian Matrix (M × N)
-              </option>
-            </select>
-            <input
-              type="number"
-              className="primer-input"
-              style={{ width: 85 }}
-              min={1}
-              max={200}
-              value={newMaxNodes}
-              onChange={(e) =>
-                setNewMaxNodes(Math.max(1, Number(e.target.value) || 20))
-              }
-              title="Max SOCKS5 endpoints generated for this chain rule"
-            />
-          </div>
-
-          <button
-            type="button"
-            className="primer-btn primer-btn-primary"
-            onClick={handleAddRule}
-          >
-            <Plus size={13} />
-            <span>Add Chain Link Rule</span>
-          </button>
-        </div>
+              <button
+                type="button"
+                className="primer-btn primer-btn-primary"
+                onClick={handleAddRule}
+              >
+                <Plus size={13} />
+                <span>Add Chain Link Rule</span>
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Active Chain Link Rules List */}
         <div
@@ -251,6 +315,18 @@ export const ChainRuleBuilderPanel: React.FC = () => {
             marginTop: 4,
           }}
         >
+          {chainRules.length === 0 && (
+            <div
+              style={{
+                fontSize: 11.5,
+                color: "var(--fg-muted)",
+                padding: "6px 2px",
+              }}
+            >
+              No chain rules configured yet. Direct (0-hop) SOCKS5 endpoints are
+              generated automatically for all active subscription nodes.
+            </div>
+          )}
           {chainRules.map((rule) => {
             const edgeStat = visualEdges.find((e) => e.ruleId === rule.id);
             const isSelected = selectedChainRuleId === rule.id;

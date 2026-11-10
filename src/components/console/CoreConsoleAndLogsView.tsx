@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   Terminal,
   CheckCircle2,
@@ -9,6 +9,8 @@ import {
   Cpu,
 } from 'lucide-react'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { checkCoreBinaryStatus } from '../../services/tauriGateway'
+import { BinaryStatusInfo } from '../../types/singbox'
 
 export const CoreConsoleAndLogsView: React.FC = () => {
   const {
@@ -26,6 +28,13 @@ export const CoreConsoleAndLogsView: React.FC = () => {
   const [ipInput, setIpInput] = useState(listenIp)
   const [portInput, setPortInput] = useState(String(listenPort))
   const [isChecking, setIsChecking] = useState(false)
+  const [binaryStatus, setBinaryStatus] = useState<BinaryStatusInfo | null>(null)
+
+  useEffect(() => {
+    checkCoreBinaryStatus()
+      .then((info) => setBinaryStatus(info))
+      .catch(() => {})
+  }, [])
 
   const handleApplyEndpoint = () => {
     const parsedPort = Number(portInput) || 11400
@@ -53,30 +62,26 @@ export const CoreConsoleAndLogsView: React.FC = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+    <div className="view-container">
       {/* Top Runtime Settings & Binary Validator */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--space-4)',
-        }}
-      >
+      <div className="responsive-two-col-grid">
         {/* Left: Sing-box 1.14.4 Core Validator */}
-        <div className="panel" style={{ padding: 'var(--space-4)' }}>
+        <div className="panel" style={{ padding: 'var(--space-4)', minWidth: 0 }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
               marginBottom: 'var(--space-3)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Cpu size={18} style={{ color: 'var(--accent-fg)' }} />
+              <Cpu size={18} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
               <div>
                 <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
-                  Sing-box 1.14.4 Stable Schema & Binary Verifier
+                  Sing-box 1.14.4 Stable Schema &amp; Binary Verifier
                 </div>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-muted)' }}>
                   Validates <code>route.default_domain_resolver</code>, <code>domain_resolver</code> per outbound,
@@ -86,6 +91,7 @@ export const CoreConsoleAndLogsView: React.FC = () => {
             </div>
 
             <button
+              type="button"
               className="btn btn-sm btn-primary"
               onClick={handleRunSingboxCheck}
               disabled={isChecking}
@@ -95,11 +101,33 @@ export const CoreConsoleAndLogsView: React.FC = () => {
             </button>
           </div>
 
+          {binaryStatus && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+                marginBottom: 'var(--space-3)',
+                fontSize: '11px',
+              }}
+            >
+              <span className={`badge ${binaryStatus.imported ? 'badge-success' : 'badge-warning'}`}>
+                {binaryStatus.imported
+                  ? `Binary Ready: sing-box ${binaryStatus.version || '1.14.4'}`
+                  : 'Binary Not Found (Using Schema Validator)'}
+              </span>
+              {binaryStatus.binary_path && (
+                <code style={{ color: 'var(--fg-muted)' }}>{binaryStatus.binary_path}</code>
+              )}
+            </div>
+          )}
+
           {lastCheckResult && (
             <div
               style={{
                 padding: 'var(--space-3)',
-                borderRadius: 'var(--radius-md)',
+                borderRadius: '6px',
                 background: lastCheckResult.valid
                   ? 'var(--success-subtle)'
                   : 'var(--danger-subtle)',
@@ -117,7 +145,7 @@ export const CoreConsoleAndLogsView: React.FC = () => {
               ) : (
                 <AlertCircle size={16} style={{ color: 'var(--danger-fg)', flexShrink: 0, marginTop: '2px' }} />
               )}
-              <div>
+              <div style={{ minWidth: 0, wordBreak: 'break-word' }}>
                 <div style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
                   {lastCheckResult.version} ({lastCheckResult.checkedAt})
                 </div>
@@ -130,24 +158,24 @@ export const CoreConsoleAndLogsView: React.FC = () => {
         </div>
 
         {/* Right: Local SOCKS5 Bridge & Surge 5.10 Export Settings */}
-        <div className="panel" style={{ padding: 'var(--space-4)' }}>
+        <div className="panel" style={{ padding: 'var(--space-4)', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 'var(--space-3)' }}>
-            <Settings size={16} style={{ color: 'var(--accent-fg)' }} />
+            <Settings size={16} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
             <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
-              Local SOCKS5 Multiplexer & Surge 5.10 Smart Bridge
+              Local SOCKS5 Multiplexer &amp; Surge 5.10 Smart Bridge
             </span>
           </div>
 
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 120px auto',
+              display: 'flex',
+              flexWrap: 'wrap',
               gap: '8px',
-              alignItems: 'end',
+              alignItems: 'flex-end',
               marginBottom: 'var(--space-3)',
             }}
           >
-            <div>
+            <div style={{ flex: '1 1 160px', minWidth: 140 }}>
               <label style={{ fontSize: '11px', color: 'var(--fg-muted)', display: 'block', marginBottom: '4px' }}>
                 SOCKS5 Bind IP
               </label>
@@ -159,7 +187,7 @@ export const CoreConsoleAndLogsView: React.FC = () => {
                 onChange={(e) => setIpInput(e.target.value)}
               />
             </div>
-            <div>
+            <div style={{ flex: '0 1 120px', minWidth: 100 }}>
               <label style={{ fontSize: '11px', color: 'var(--fg-muted)', display: 'block', marginBottom: '4px' }}>
                 Listen Port
               </label>
@@ -171,7 +199,7 @@ export const CoreConsoleAndLogsView: React.FC = () => {
                 onChange={(e) => setPortInput(e.target.value)}
               />
             </div>
-            <button className="btn btn-sm btn-primary" onClick={handleApplyEndpoint}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={handleApplyEndpoint}>
               Apply Endpoint
             </button>
           </div>
@@ -201,22 +229,24 @@ export const CoreConsoleAndLogsView: React.FC = () => {
       </div>
 
       {/* Console Log Stream */}
-      <div className="panel" style={{ padding: 'var(--space-4)' }}>
+      <div className="panel" style={{ padding: 'var(--space-4)', minWidth: 0 }}>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
             marginBottom: 'var(--space-3)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Terminal size={16} style={{ color: 'var(--accent-fg)' }} />
+            <Terminal size={16} style={{ color: 'var(--accent-fg)', flexShrink: 0 }} />
             <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>
-              Sing-box 1.14.4 & Converter Telemetry Console ({logs.length} entries)
+              Sing-box 1.14.4 &amp; Converter Telemetry Console ({logs.length} entries)
             </span>
           </div>
-          <button className="btn btn-sm" onClick={clearLogs}>
+          <button type="button" className="btn btn-sm" onClick={clearLogs}>
             <Trash2 size={12} />
             Clear Console
           </button>
@@ -234,28 +264,33 @@ export const CoreConsoleAndLogsView: React.FC = () => {
             fontSize: '12px',
           }}
         >
-          {logs.map((entry) => {
-            const levelColor =
-              entry.level === 'ERROR' || entry.level === 'FATAL'
-                ? 'var(--danger-fg)'
-                : entry.level === 'WARN'
-                  ? 'var(--warning-fg)'
-                  : entry.level === 'DEBUG'
-                    ? 'var(--fg-muted)'
-                    : 'var(--success-fg)'
-            return (
-              <div key={entry.id} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
-                <span style={{ color: 'var(--fg-muted)' }}>[{entry.timestamp}] </span>
-                <span style={{ color: levelColor, fontWeight: 600 }}>
-                  [{entry.level}]
-                </span>{' '}
-                <span style={{ color: 'var(--accent-fg)' }}>[{entry.source}]</span>{' '}
-                <span>{entry.message}</span>
-              </div>
-            )
-          })}
+          {logs.length === 0 ? (
+            <div style={{ color: 'var(--fg-muted)' }}>No console logs recorded.</div>
+          ) : (
+            logs.map((entry) => {
+              const levelColor =
+                entry.level === 'ERROR' || entry.level === 'FATAL'
+                  ? 'var(--danger-fg)'
+                  : entry.level === 'WARN'
+                    ? 'var(--warning-fg)'
+                    : entry.level === 'DEBUG'
+                      ? 'var(--fg-muted)'
+                      : 'var(--success-fg)'
+              return (
+                <div key={entry.id} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                  <span style={{ color: 'var(--fg-muted)' }}>[{entry.timestamp}] </span>
+                  <span style={{ color: levelColor, fontWeight: 600 }}>
+                    [{entry.level}]
+                  </span>{' '}
+                  <span style={{ color: 'var(--accent-fg)' }}>[{entry.source}]</span>{' '}
+                  <span>{entry.message}</span>
+                </div>
+              )
+            })
+          )}
         </div>
       </div>
     </div>
   )
 }
+

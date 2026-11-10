@@ -1,39 +1,81 @@
-<svg width="120" height="120" viewBox="0 0 136 136" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    .fav-bg { fill: #FFFFFF; }
-    @media (prefers-color-scheme: dark) {
-      .fav-bg { fill: #000000; }
-    }
-  </style>
-  <circle class="fav-bg" cx="68" cy="68" r="65" fill="#FFFFFF"/>
-  <g transform="translate(12 10)">
-    <path d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z" fill="#3186FF"/>
-    <mask id="ag_fav_m" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="13" y="18" width="85" height="78">
-      <path d="M89.6992 93.695C94.3659 97.195 101.366 94.8617 94.9492 88.445C75.6992 69.7783 79.7825 18.445 55.8659 18.445C31.9492 18.445 36.0325 69.7783 16.7825 88.445C9.78251 95.445 17.3658 97.195 22.0325 93.695C40.1159 81.445 38.9492 59.8617 55.8659 59.8617C72.7825 59.8617 71.6159 81.445 89.6992 93.695Z" fill="black"/>
-    </mask>
-    <g mask="url(#ag_fav_m)">
-      <g filter="url(#ag_fav_f0)"><ellipse cx="22.7873" cy="26.8098" rx="22.7873" ry="26.8098" transform="matrix(-0.112784 0.99362 -0.99362 -0.112781 66.2473 -15.5344)" fill="#FFE432"/></g>
-      <g filter="url(#ag_fav_f1)"><ellipse cx="96.491" cy="35.1231" rx="29.5007" ry="30.1492" transform="rotate(76.9243 96.491 35.1231)" fill="#FC413D"/></g>
-      <g filter="url(#ag_fav_f2)"><ellipse cx="9.02988" cy="41.6647" rx="30.832" ry="39.9417" transform="rotate(74.1257 9.02988 41.6647)" fill="#00B95C"/></g>
-      <g filter="url(#ag_fav_f3)"><ellipse cx="11.2212" cy="42.8915" rx="30.22" ry="33.2695" transform="rotate(45.6065 11.2212 42.8915)" fill="#00B95C"/></g>
-      <g filter="url(#ag_fav_f4)"><ellipse cx="75.7546" cy="104.822" rx="29.0177" ry="27.943" transform="rotate(76.9243 75.7546 104.822)" fill="#3186FF"/></g>
-      <g filter="url(#ag_fav_f5)"><ellipse cx="33.5661" cy="35.4043" rx="33.5661" ry="35.4043" transform="matrix(-0.409539 0.912293 -0.912294 -0.409537 101.25 -15.1674)" fill="#FBBC04"/></g>
-      <g filter="url(#ag_fav_f6)"><path d="M2.56802 149.695C-15.8116 142.48 15.5987 83.1163 23.4093 63.2203C31.22 43.3244 52.4514 33.0447 70.831 40.26C89.2107 47.4753 110.996 87.2162 103.185 107.112C95.3742 127.008 20.9477 156.91 2.56802 149.695Z" fill="#3186FF"/></g>
-      <g filter="url(#ag_fav_f7)"><path d="M113.934 75.8079C109.013 81.5509 96.1724 78.6224 85.253 69.2667C74.3335 59.911 69.4704 47.6711 74.391 41.928C79.3116 36.185 92.1525 39.1136 103.072 48.4692C113.991 57.8249 118.855 70.0648 113.934 75.8079Z" fill="#749BFF"/></g>
-      <g filter="url(#ag_fav_f8)"><ellipse cx="92.611" cy="23.7962" rx="44.2411" ry="27.5016" transform="rotate(34.0763 92.611 23.7962)" fill="#FC413D"/></g>
-      <g filter="url(#ag_fav_f9)"><ellipse cx="23.4949" cy="29.5887" rx="23.7071" ry="13.7869" transform="rotate(112.516 23.4949 29.5887)" fill="#FFEE48"/></g>
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="102 90 820 820">
   <defs>
-    <filter id="ag_fav_f0" x="2.49348" y="-26.5423" width="69.0899" height="61.2525" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="3.89034"/></filter>
-    <filter id="ag_fav_f1" x="28.7524" y="-32.0333" width="135.477" height="134.313" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="18.8078"/></filter>
-    <filter id="ag_fav_f2" x="-62.2884" y="-21.9253" width="142.637" height="127.18" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="15.9884"/></filter>
-    <filter id="ag_fav_f3" x="-52.5697" y="-20.8346" width="127.582" height="127.452" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="15.9884"/></filter>
-    <filter id="ag_fav_f4" x="17.3619" y="45.4646" width="116.786" height="118.715" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="15.1937"/></filter>
-    <filter id="ag_fav_f5" x="-7.44765" y="-60.4737" width="125.303" height="122.858" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="13.7698"/></filter>
-    <filter id="ag_fav_f6" x="-27.7086" y="13.3597" width="157.119" height="162.029" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="12.297"/></filter>
-    <filter id="ag_fav_f7" x="50.4638" y="16.981" width="87.3973" height="83.7738" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="11.0036"/></filter>
-    <filter id="ag_fav_f8" x="34.2604" y="-28.457" width="116.701" height="104.506" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="9.29385"/></filter>
-    <filter id="ag_fav_f9" x="-15.1522" y="-15.9493" width="77.2941" height="91.076" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="11.5027"/></filter>
+    <linearGradient id="bg25" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#242F37"/>
+      <stop offset="1" stop-color="#0D1317"/>
+    </linearGradient>
+    <radialGradient id="spot25" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#46565F" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#46565F" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft25" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <linearGradient id="top25" gradientUnits="userSpaceOnUse" x1="330" y1="320" x2="700" y2="490">
+      <stop offset="0" stop-color="#445863"/>
+      <stop offset="1" stop-color="#394C57"/>
+    </linearGradient>
+    <linearGradient id="left25" gradientUnits="userSpaceOnUse" x1="269.5" y1="480" x2="512" y2="720">
+      <stop offset="0" stop-color="#26323A"/>
+      <stop offset="1" stop-color="#1F2A31"/>
+    </linearGradient>
+    <linearGradient id="right25" gradientUnits="userSpaceOnUse" x1="512" y1="650" x2="754.5" y2="500">
+      <stop offset="0" stop-color="#30404A"/>
+      <stop offset="1" stop-color="#374854"/>
+    </linearGradient>
+    <filter id="grain25" x="0" y="0" width="280" height="280" filterUnits="userSpaceOnUse">
+      <feTurbulence type="fractalNoise" baseFrequency="0.22" numOctaves="4" seed="17" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.45 0 0 0 -0.1"/>
+    </filter>
+    <filter id="grainD25" x="0" y="0" width="280" height="280" filterUnits="userSpaceOnUse">
+      <feTurbulence type="fractalNoise" baseFrequency="0.28" numOctaves="4" seed="41" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.02  0 0 0 0 0.05  0 0 0 0 0.07  0.45 0 0 0 -0.1"/>
+    </filter>
+    <clipPath id="clipTopD"><path d="M512 262 754.5 402 512 542 269.5 402Z"/></clipPath>
+    <clipPath id="clipLeftD"><path d="M269.5 402 512 542 512 812 269.5 672Z"/></clipPath>
+    <clipPath id="clipRightD"><path d="M512 542 754.5 402 754.5 672 512 812Z"/></clipPath>
   </defs>
+  <g transform="translate(-225.28 -273.28) scale(1.44)">
+<!-- deep cardboard faces -->
+  <path d="M512 262 754.5 402 512 542 269.5 402Z" fill="url(#top25)"/>
+  <path d="M269.5 402 512 542 512 812 269.5 672Z" fill="url(#left25)"/>
+  <path d="M512 542 754.5 402 754.5 672 512 812Z" fill="url(#right25)"/>
+
+  <!-- paper grain, foreshortened per face -->
+  <g clip-path="url(#clipTopD)"><g transform="matrix(0.866 0.5 0.866 -0.5 269.5 402)">
+    <rect width="280" height="280" filter="url(#grain25)" opacity="0.30"/>
+    <rect width="280" height="280" filter="url(#grainD25)" opacity="0.38"/>
+  </g></g>
+  <g clip-path="url(#clipLeftD)"><g transform="matrix(0.866 0.5 0 0.96428 269.5 402)">
+    <rect width="280" height="280" filter="url(#grain25)" opacity="0.20"/>
+    <rect width="280" height="280" filter="url(#grainD25)" opacity="0.34"/>
+  </g></g>
+  <g clip-path="url(#clipRightD)"><g transform="matrix(0.866 -0.5 0 0.96428 512 542)">
+    <rect width="280" height="280" filter="url(#grain25)" opacity="0.25"/>
+    <rect width="280" height="280" filter="url(#grainD25)" opacity="0.34"/>
+  </g></g>
+
+  <!-- lid flap seam: two lid halves, paper-edge catchlight -->
+  <path d="M390.75 472 633.25 332" stroke="#141E24" stroke-width="4" fill="none" opacity="0.9"/>
+  <path d="M390.75 472 633.25 332" stroke="#6E8794" stroke-width="2" fill="none" opacity="0.7" transform="translate(0 -3)"/>
+
+  <!-- soft ambient occlusion at junctions -->
+  <path d="M269.5 402 512 542" stroke="#0B141A" stroke-width="10" opacity="0.28" filter="url(#soft25)" fill="none"/>
+  <path d="M512 542 754.5 402" stroke="#0B141A" stroke-width="10" opacity="0.22" filter="url(#soft25)" fill="none"/>
+  <path d="M512 542 512 812" stroke="#060D11" stroke-width="9" opacity="0.30" filter="url(#soft25)" fill="none"/>
+
+  <!-- paper-edge highlights on the top edges -->
+  <path d="M512 262 754.5 402" stroke="#66808D" stroke-width="2.5" fill="none"/>
+  <path d="M512 262 269.5 402" stroke="#5A737F" stroke-width="2.5" fill="none"/>
+  <path d="M269.5 402 512 542 754.5 402" stroke="#4E6773" stroke-width="2" fill="none" opacity="0.9"/>
+  <path d="M512 542 512 812" stroke="#445963" stroke-width="2" fill="none" opacity="0.9"/>
+
+  <!-- original two-tone tape, aligned tails -->
+  <path d="M356.8 351.6 390.75 332 633.25 472 599.3 491.6Z" fill="#99AAB5"/>
+  <path d="M390.75 332 424.7 312.4 667.2 452.4 633.25 472Z" fill="#E1E8ED"/>
+  <path d="M599.3 491.6 633.25 472 633.25 592 599.3 611.6Z" fill="#8296A1"/>
+  <path d="M633.25 472 667.2 452.4 667.2 572.4 633.25 592Z" fill="#CCD6DD"/>
+  <!-- tape soft shadow onto the paper -->
+  <path d="M360 358 602.5 498" stroke="#000000" opacity="0.25" stroke-width="7" filter="url(#soft25)" fill="none"/>
+  </g>
 </svg>
