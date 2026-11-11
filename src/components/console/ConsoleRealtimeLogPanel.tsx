@@ -13,6 +13,7 @@ export const ConsoleRealtimeLogPanel: React.FC = () => {
   const appendLogsBatch = useWorkspaceStore((s) => s.appendLogsBatch);
   const runningMode = useWorkspaceStore((s) => s.runningMode);
   const setRunningMode = useWorkspaceStore((s) => s.setRunningMode);
+  const setDualSlotStatus = useWorkspaceStore((s) => s.setDualSlotStatus);
 
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [bottomUpOrder, setBottomUpOrder] = useState<boolean>(false);
@@ -23,40 +24,15 @@ export const ConsoleRealtimeLogPanel: React.FC = () => {
   // Subscribe to batched Tauri IPC log stream ("singbox-log-batch") + lightweight status delta poll
   useEffect(() => {
     let unlistenFn: (() => void) | null = null;
+    let unlistenTrayFn: (() => void) | null = null;
     let cancelled = false;
-
-    if (isTauriRuntime()) {
-      import("@tauri-apps/api/event")
-        .then(({ listen }) =>
-          listen<string[]>("singbox-log-batch", (event) => {
-            if (cancelled || !Array.isArray(event.payload)) return;
-            const fresh: string[] = [];
-            for (const raw of event.payload) {
-              if (!seenServiceLinesRef.current.has(raw)) {
-                seenServiceLinesRef.current.add(raw);
-                fresh.push(`[INFO][sing-box] ${raw}`);
-              }
-            }
-            if (fresh.length > 0) {
-              appendLogsBatch(fresh);
-            }
-          })
-        )
-        .then((unlisten) => {
-          if (cancelled) {
-            unlisten();
-          } else {
-            unlistenFn = unlisten;
-          }
-        })
-        .catch(() => {});
-    }
 
     const pollServiceLogs = async () => {
       try {
         const st = await getSingboxServiceStatus();
         if (cancelled) return;
         setRunningMode(st.running ? "normal" : "stopped");
+        setDualSlotStatus(st.stable_slot ?? null, st.working_slot ?? null);
         if (!st.running) {
           seenServiceLinesRef.current.clear();
           return;
@@ -76,6 +52,36 @@ export const ConsoleRealtimeLogPanel: React.FC = () => {
       }
     };
 
+    if (isTauriRuntime()) {
+      import("@tauri-apps/api/event")
+        .then(async ({ listen }) => {
+          const u1 = await listen<string[]>("singbox-log-batch", (event) => {
+            if (cancelled || !Array.isArray(event.payload)) return;
+            const fresh: string[] = [];
+            for (const raw of event.payload) {
+              if (!seenServiceLinesRef.current.has(raw)) {
+                seenServiceLinesRef.current.add(raw);
+                fresh.push(`[INFO][sing-box] ${raw}`);
+              }
+            }
+            if (fresh.length > 0) {
+              appendLogsBatch(fresh);
+            }
+          });
+          const u2 = await listen<string>("singbox-tray-state-changed", () => {
+            void pollServiceLogs();
+          });
+          if (cancelled) {
+            u1();
+            u2();
+          } else {
+            unlistenFn = u1;
+            unlistenTrayFn = u2;
+          }
+        })
+        .catch(() => {});
+    }
+
     void pollServiceLogs();
     const intervalMs = runningMode !== "stopped" ? 1000 : 3000;
     const timer = setInterval(pollServiceLogs, intervalMs);
@@ -86,8 +92,11 @@ export const ConsoleRealtimeLogPanel: React.FC = () => {
       if (unlistenFn) {
         unlistenFn();
       }
+      if (unlistenTrayFn) {
+        unlistenTrayFn();
+      }
     };
-  }, [appendLogsBatch, runningMode, setRunningMode]);
+  }, [appendLogsBatch, runningMode, setDualSlotStatus, setRunningMode]);
 
   // Keep only the latest 250 log entries in DOM for instant rendering
   const visibleLogs = useMemo(() => {

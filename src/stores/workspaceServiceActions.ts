@@ -41,6 +41,7 @@ export function yieldToNextPaint(): Promise<void> {
 export async function syncUiConfigSnapshotToDisk(networkState: {
   listenIp: string;
   listenPort: number;
+  workingListenPort?: number;
   autoDetectInterface: boolean;
   includeSurgeProxyGroups: boolean;
 }): Promise<string | null> {
@@ -48,6 +49,7 @@ export async function syncUiConfigSnapshotToDisk(networkState: {
   return persistAgentFriendlyUiConfig({
     listen_ip: networkState.listenIp,
     listen_port: networkState.listenPort,
+    working_listen_port: networkState.workingListenPort ?? 11401,
     auto_detect_interface: networkState.autoDetectInterface,
     advanced_mode: themeState.advancedMode,
     topbar_icon_style: themeState.topbarIconStyle,
@@ -60,6 +62,7 @@ export async function hydrateStoresFromDiskUiConfig(
   applyNetworkPatch: (patch: {
     listenIp: string;
     listenPort: number;
+    workingListenPort: number;
     autoDetectInterface: boolean;
     includeSurgeProxyGroups: boolean;
   }) => void
@@ -74,6 +77,11 @@ export async function hydrateStoresFromDiskUiConfig(
       typeof diskCfg.listen_port === "number" && diskCfg.listen_port >= 1024
         ? diskCfg.listen_port
         : 11400,
+    workingListenPort:
+      typeof diskCfg.working_listen_port === "number" &&
+      diskCfg.working_listen_port >= 1024
+        ? diskCfg.working_listen_port
+        : 11401,
     autoDetectInterface:
       typeof diskCfg.auto_detect_interface === "boolean"
         ? diskCfg.auto_detect_interface
@@ -277,29 +285,36 @@ export async function performServiceStartOrStop(
     setPartial: (patch: Record<string, any>) => void;
     appendLog: (line: string) => void;
     appendLogsBatch: (lines: string[]) => void;
-  }
+  },
+  profile: "stable" | "working" | "all" = "stable"
 ): Promise<{ ok: boolean; message: string }> {
   context.setPartial({ isStartingService: true });
   await yieldToNextPaint();
 
   try {
     if (action === "stop") {
-      const res = await stopSingboxService();
+      const res = await stopSingboxService(profile);
       context.setPartial({
-        runningMode: "stopped",
+        runningMode: res.running ? "normal" : "stopped",
+        stableSlotStatus: res.stable_slot ?? null,
+        workingSlotStatus: res.working_slot ?? null,
         isStartingService: false,
       });
       context.appendLog(`[INFO][Service] ${res.message}`);
       return { ok: true, message: res.message };
     }
 
+    const targetProfile: "stable" | "working" =
+      profile === "working" ? "working" : "stable";
     const jsonText = JSON.stringify(context.getSingboxConfig(), null, 2);
     const surgeText = context.getSurgeConfigText();
-    const res = await startSingboxService(jsonText, surgeText);
+    const res = await startSingboxService(jsonText, surgeText, targetProfile);
 
     if (res.running) {
       context.setPartial({
         runningMode: "normal",
+        stableSlotStatus: res.stable_slot ?? null,
+        workingSlotStatus: res.working_slot ?? null,
         isStartingService: false,
       });
       context.appendLog(`[INFO][Service] ${res.message}`);
@@ -310,6 +325,8 @@ export async function performServiceStartOrStop(
     } else {
       context.setPartial({
         runningMode: "stopped",
+        stableSlotStatus: res.stable_slot ?? null,
+        workingSlotStatus: res.working_slot ?? null,
         isStartingService: false,
       });
       context.appendLog(`[ERROR][Service] ${res.message}`);
@@ -326,26 +343,39 @@ export async function performServiceStartOrStop(
   }
 }
 
-export async function performSingboxCheck(context: {
-  getSingboxConfig: () => any;
-  getSurgeConfigText: () => string;
-  setPartial: (patch: Record<string, any>) => void;
-  appendLog: (line: string) => void;
-}): Promise<void> {
+export async function performSingboxCheck(
+  context: {
+    getSingboxConfig: () => any;
+    getSurgeConfigText: () => string;
+    setPartial: (patch: Record<string, any>) => void;
+    appendLog: (line: string) => void;
+  },
+  promoteToStable = false
+): Promise<void> {
   context.setPartial({ isCheckingConfig: true });
   await yieldToNextPaint();
 
   try {
     const jsonText = JSON.stringify(context.getSingboxConfig(), null, 2);
     const surgeText = context.getSurgeConfigText();
-    const res = await validateSingboxConfigWithCore(jsonText, surgeText);
+    const res = await validateSingboxConfigWithCore(
+      jsonText,
+      surgeText,
+      promoteToStable
+    );
     context.setPartial({
       lastCheckResult: res,
       isCheckingConfig: false,
     });
-    if (res.serviceReloaded) {
+    if (promoteToStable) {
       context.appendLog(
-        `[INFO][Service] Dynamic config sync complete -> hot-reloaded running sing-box service (${res.singboxConfigPath}).`
+        `[INFO][Config] Promoted current Working configuration to Stable (${
+          res.stableConfigPath || "config.stable.json"
+        }).`
+      );
+    } else if (res.serviceReloaded) {
+      context.appendLog(
+        `[INFO][Service] Dynamic config sync complete -> hot-reloaded Working core (${res.singboxConfigPath}); Stable core untouched.`
       );
     }
   } catch (err: any) {

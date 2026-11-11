@@ -269,6 +269,7 @@ export function isTauriRuntime(): boolean {
 export interface PersistedUiConfig {
   listen_ip: string;
   listen_port: number;
+  working_listen_port?: number;
   auto_detect_interface: boolean;
   advanced_mode: boolean;
   topbar_icon_style: "monochrome" | "real";

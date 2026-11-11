@@ -18,6 +18,7 @@ export const TopbarSettingsPopover: React.FC = () => {
   const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const workingListenPort = useWorkspaceStore((s) => s.workingListenPort);
   const includeSurgeProxyGroups = useWorkspaceStore(
     (s) => s.includeSurgeProxyGroups
   );
@@ -45,6 +46,7 @@ export const TopbarSettingsPopover: React.FC = () => {
     void syncUiConfigSnapshotToDisk({
       listenIp,
       listenPort,
+      workingListenPort,
       autoDetectInterface,
       includeSurgeProxyGroups,
     });
@@ -55,6 +57,7 @@ export const TopbarSettingsPopover: React.FC = () => {
     void syncUiConfigSnapshotToDisk({
       listenIp,
       listenPort,
+      workingListenPort,
       autoDetectInterface,
       includeSurgeProxyGroups,
     });
@@ -168,8 +171,8 @@ export const TopbarSettingsPopover: React.FC = () => {
                 }}
               >
                 {topbarIconStyle === "monochrome"
-                  ? "Applied to OS system tray / macOS menu bar as a native template icon (auto-adapts to macOS top bar)."
-                  : "Applied to OS system tray / macOS menu bar using full-color 3D box artwork."}
+                  ? "Apple macOS HIG Template Icon: renders 100% crisp white when Core is running, and dims to 42% alpha when stopped."
+                  : "Applied to OS system tray / macOS menu bar using full-color 3D box artwork (dims when stopped)."}
               </div>
             </div>
 
@@ -312,14 +315,15 @@ export const TopbarSettingsPopover: React.FC = () => {
                 }}
               >
                 <FolderCode size={12} />
-                <span>Agent-Friendly Config &amp; Binary Directory</span>
+                <span>Dual-Profile Config &amp; Binary Directory</span>
               </div>
               <div style={{ color: "var(--fg-muted)" }}>
                 <code>~/Library/Application Support/com.antigravity.singboxguiv0/</code>
                 <br />
-                Persists <code>ui-config.json</code> (port, IP, switches),{" "}
-                <code>config.json</code>, <code>aSingbox127.conf</code> &amp;{" "}
-                <code>sing-box</code>.
+                Persists <code>config.stable.json</code> (:{listenPort}),{" "}
+                <code>config.working.json</code> (:{workingListenPort}),{" "}
+                <code>ui-config.json</code>, <code>managed-pids.json</code>{" "}
+                &amp; <code>sing-box</code>.
               </div>
             </div>
           </div>

@@ -119,10 +119,14 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
     lastCheckResult?.configDir ||
     binaryStatus?.config_dir ||
     "~/Library/Application Support/com.antigravity.singboxguiv0";
-  const effectiveSingboxCfgPath =
+  const effectiveStableCfgPath =
+    lastCheckResult?.stableConfigPath ||
+    `${effectiveConfigDir}/config.stable.json`;
+  const effectiveWorkingCfgPath =
+    lastCheckResult?.workingConfigPath ||
     lastCheckResult?.singboxConfigPath ||
     binaryStatus?.singbox_config_path ||
-    `${effectiveConfigDir}/config.json`;
+    `${effectiveConfigDir}/config.working.json`;
   const effectiveSurgeCfgPath =
     lastCheckResult?.surgeConfigPath ||
     binaryStatus?.surge_config_path ||
@@ -152,13 +156,12 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
           <Cpu size={18} style={{ color: "var(--accent-fg)", flexShrink: 0 }} />
           <div>
             <div style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>
-              Application Support Config Folder &amp; Sing-box 1.14.4 Binary
+              Dual-Profile Config Isolation (Stable &amp; Working) &amp; Binary
               Manager
             </div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--fg-muted)" }}>
-              Auto-syncs <code>config.json</code> &amp;{" "}
-              <code>aSingbox127.conf</code> and stores <code>sing-box</code>{" "}
-              inside Tauri&apos;s Application Support directory.
+              Dynamic edits write to <code>config.working.json</code> so{" "}
+              <code>config.stable.json</code> never freezes during live tuning.
             </div>
           </div>
         </div>
@@ -190,10 +193,12 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
           <button
             type="button"
             className="btn btn-sm"
-            onClick={refreshBinaryStatus}
-            title="Refresh binary & config directory status"
+            onClick={() => void runSingboxCheck(true)}
+            disabled={isCheckingConfig}
+            title="Promote current Working configuration into config.stable.json"
           >
-            <RefreshCw size={13} />
+            <CheckCircle2 size={13} />
+            Promote to Stable
           </button>
           <button
             type="button"
@@ -208,7 +213,7 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
             )}
             {isCheckingConfig
               ? "Syncing & Checking..."
-              : "Sync & Verify Config"}
+              : "Verify Working"}
           </button>
         </div>
       </div>
@@ -253,8 +258,8 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
                 }`}
               >
                 {summary.empty_workspace
-                  ? "config.json: 0 Proxy Nodes (Only direct)"
-                  : `config.json: ${summary.proxy_outbound_count} Proxy Outbounds | ${summary.socks_user_count} SOCKS5 Users | ${summary.urltest_pool_count} Dynamic Pools`}
+                  ? "Working Config: 0 Proxy Nodes (Only direct)"
+                  : `Working Config: ${summary.proxy_outbound_count} Proxy Outbounds | ${summary.socks_user_count} SOCKS5 Users | ${summary.urltest_pool_count} Dynamic Pools`}
               </span>
             )}
           </div>
@@ -288,16 +293,31 @@ export const CoreBinaryValidatorPanel: React.FC = () => {
             <Copy size={10} /> Copy
           </button>
 
-          <strong>Sing-box Config:</strong>
+          <strong>Stable Config:</strong>
           <code style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-            {effectiveSingboxCfgPath}
+            {effectiveStableCfgPath}
           </code>
           <button
             type="button"
             className="btn btn-sm"
             style={{ padding: "1px 6px", fontSize: 10.5 }}
             onClick={() =>
-              handleCopyPath(effectiveSingboxCfgPath, "config.json Path")
+              handleCopyPath(effectiveStableCfgPath, "config.stable.json Path")
+            }
+          >
+            <Copy size={10} /> Copy
+          </button>
+
+          <strong>Working Config:</strong>
+          <code style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {effectiveWorkingCfgPath}
+          </code>
+          <button
+            type="button"
+            className="btn btn-sm"
+            style={{ padding: "1px 6px", fontSize: 10.5 }}
+            onClick={() =>
+              handleCopyPath(effectiveWorkingCfgPath, "config.working.json Path")
             }
           >
             <Copy size={10} /> Copy

@@ -16,6 +16,7 @@ import { MitmUrlRegexRule } from "../types/mitm";
 import {
   ConversionSubscriptionSummary,
   ConvertedNodeMetadata,
+  CoreSlotStatusInfo,
   ParsedLogEntry,
   RunningMode,
   SingboxCheckResult,
@@ -94,12 +95,14 @@ interface WorkspaceState {
 
   listenIp: string;
   listenPort: number;
+  workingListenPort: number;
   logLevel: string;
   autoDetectInterface: boolean;
   includeSurgeProxyGroups: boolean;
   setNetworkParams: (patch: {
     listenIp?: string;
     listenPort?: number;
+    workingListenPort?: number;
     logLevel?: string;
     autoDetectInterface?: boolean;
     includeSurgeProxyGroups?: boolean;
@@ -127,9 +130,16 @@ interface WorkspaceState {
   lastCheckResult: SingboxCheckResult | null;
   isCheckingConfig: boolean;
   isStartingService: boolean;
-  runSingboxCheck: () => Promise<void>;
+  stableSlotStatus: CoreSlotStatusInfo | null;
+  workingSlotStatus: CoreSlotStatusInfo | null;
+  setDualSlotStatus: (
+    stable: CoreSlotStatusInfo | null,
+    working: CoreSlotStatusInfo | null
+  ) => void;
+  runSingboxCheck: (promoteToStable?: boolean) => Promise<void>;
   startOrStopServiceAction: (
-    action: "start" | "stop"
+    action: "start" | "stop",
+    profile?: "stable" | "working" | "all"
   ) => Promise<{ ok: boolean; message: string }>;
   recomputePipeline: () => void;
 
@@ -281,6 +291,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   listenIp: initialNet.listenIp,
   listenPort: initialNet.listenPort,
+  workingListenPort: initialNet.workingListenPort,
   logLevel: "info",
   autoDetectInterface: initialNet.autoDetectInterface,
   includeSurgeProxyGroups: initialNet.includeSurgeProxyGroups,
@@ -288,6 +299,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const cur = get();
     const nextListenIp = patch.listenIp ?? cur.listenIp;
     const nextListenPort = patch.listenPort ?? cur.listenPort;
+    const nextWorkingPort = patch.workingListenPort ?? cur.workingListenPort;
     const nextLogLevel = patch.logLevel ?? cur.logLevel;
     const nextAutoDetect =
       patch.autoDetectInterface ?? cur.autoDetectInterface;
@@ -297,6 +309,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({
       listenIp: nextListenIp,
       listenPort: nextListenPort,
+      workingListenPort: nextWorkingPort,
       logLevel: nextLogLevel,
       autoDetectInterface: nextAutoDetect,
       includeSurgeProxyGroups: nextIncludeGroups,
@@ -305,6 +318,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const netSnapshot = {
       listenIp: nextListenIp,
       listenPort: nextListenPort,
+      workingListenPort: nextWorkingPort,
       autoDetectInterface: nextAutoDetect,
       includeSurgeProxyGroups: nextIncludeGroups,
     };
@@ -319,6 +333,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (
         cur.listenIp !== netPatch.listenIp ||
         cur.listenPort !== netPatch.listenPort ||
+        cur.workingListenPort !== netPatch.workingListenPort ||
         cur.autoDetectInterface !== netPatch.autoDetectInterface ||
         cur.includeSurgeProxyGroups !== netPatch.includeSurgeProxyGroups
       ) {
@@ -390,6 +405,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   lastCheckResult: null,
   isCheckingConfig: false,
   isStartingService: false,
+  stableSlotStatus: null,
+  workingSlotStatus: null,
+  setDualSlotStatus: (stable, working) =>
+    set({ stableSlotStatus: stable, workingSlotStatus: working }),
 
   recomputePipeline: () => {
     const s = get();
@@ -411,26 +430,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       clearTimeout(backgroundCheckTimer);
     }
     backgroundCheckTimer = setTimeout(() => {
-      void get().runSingboxCheck();
+      void get().runSingboxCheck(false);
     }, 180);
   },
 
-  runSingboxCheck: () =>
-    performSingboxCheck({
-      getSingboxConfig: () => get().singboxConfig,
-      getSurgeConfigText: () => get().surgeConfigText,
-      setPartial: (patch) => set(patch as any),
-      appendLog: (line) => get().appendLog(line),
-    }),
+  runSingboxCheck: (promoteToStable = false) =>
+    performSingboxCheck(
+      {
+        getSingboxConfig: () => get().singboxConfig,
+        getSurgeConfigText: () => get().surgeConfigText,
+        setPartial: (patch) => set(patch as any),
+        appendLog: (line) => get().appendLog(line),
+      },
+      promoteToStable
+    ),
 
-  startOrStopServiceAction: (action) =>
-    performServiceStartOrStop(action, {
-      getSingboxConfig: () => get().singboxConfig,
-      getSurgeConfigText: () => get().surgeConfigText,
-      setPartial: (patch) => set(patch as any),
-      appendLog: (line) => get().appendLog(line),
-      appendLogsBatch: (lines) => get().appendLogsBatch(lines),
-    }),
+  startOrStopServiceAction: (action, profile = "stable") =>
+    performServiceStartOrStop(
+      action,
+      {
+        getSingboxConfig: () => get().singboxConfig,
+        getSurgeConfigText: () => get().surgeConfigText,
+        setPartial: (patch) => set(patch as any),
+        appendLog: (line) => get().appendLog(line),
+        appendLogsBatch: (lines) => get().appendLogsBatch(lines),
+      },
+      profile
+    ),
 
   mitmRules: [],
   addMitmRule: (ruleInput) => {
@@ -457,7 +483,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setRunningMode: (mode) => set({ runningMode: mode }),
   logs: [
     parseRawLogLine(
-      "[INFO][Converter] SingboxGUI V0 initialized with Sing-box 1.14.4 schema & Surge 5.10 SOCKS5 bridge.",
+      "[INFO][Converter] SingboxGUI V0 initialized with Dual-Profile Config Isolation (config.stable.json + config.working.json) & Surge 5.10 SOCKS5 bridge.",
       1
     ),
     parseRawLogLine(

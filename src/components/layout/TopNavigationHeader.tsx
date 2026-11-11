@@ -53,6 +53,7 @@ export const TopNavigationHeader: React.FC = () => {
   const directNodes = useWorkspaceStore((s) => s.directNodes);
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const workingListenPort = useWorkspaceStore((s) => s.workingListenPort);
   const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
   const includeSurgeProxyGroups = useWorkspaceStore(
     (s) => s.includeSurgeProxyGroups
@@ -61,6 +62,8 @@ export const TopNavigationHeader: React.FC = () => {
   const isCheckingConfig = useWorkspaceStore((s) => s.isCheckingConfig);
   const isStartingService = useWorkspaceStore((s) => s.isStartingService);
   const runningMode = useWorkspaceStore((s) => s.runningMode);
+  const stableSlotStatus = useWorkspaceStore((s) => s.stableSlotStatus);
+  const workingSlotStatus = useWorkspaceStore((s) => s.workingSlotStatus);
   const runSingboxCheck = useWorkspaceStore((s) => s.runSingboxCheck);
   const setSecurityPolicy = useWorkspaceStore((s) => s.setSecurityPolicy);
 
@@ -73,7 +76,10 @@ export const TopNavigationHeader: React.FC = () => {
   );
   const pinnedInsecureCount =
     insecureNodes.length - unpinnedInsecureNodes.length;
-  const isServiceRunning = runningMode !== "stopped";
+  const isStableRunning = Boolean(stableSlotStatus?.running);
+  const isWorkingRunning = Boolean(workingSlotStatus?.running);
+  const isServiceRunning =
+    isStableRunning || isWorkingRunning || runningMode !== "stopped";
 
   const handleToggleAdvancedButton = () => {
     const next = !advancedMode;
@@ -84,6 +90,7 @@ export const TopNavigationHeader: React.FC = () => {
     void syncUiConfigSnapshotToDisk({
       listenIp,
       listenPort,
+      workingListenPort,
       autoDetectInterface,
       includeSurgeProxyGroups,
     });
@@ -130,9 +137,9 @@ export const TopNavigationHeader: React.FC = () => {
 
               <span
                 className="primer-badge primer-badge-success"
-                title={`SOCKS5 Bridge listening on ${listenIp}:${listenPort}`}
+                title={`Stable Core listening on ${listenIp}:${listenPort} (config.stable.json) | Working Core on ${listenIp}:${workingListenPort} (config.working.json)`}
               >
-                SOCKS5 :{listenPort}
+                Stable :{listenPort} / Working :{workingListenPort}
               </span>
 
               {autoDetectInterface && (
@@ -163,8 +170,9 @@ export const TopNavigationHeader: React.FC = () => {
               </span>
 
               <span className="primer-badge primer-badge-success">
-                SOCKS5 Bridge: {listenIp}:{listenPort} ({endpoints.length}{" "}
-                users: {directNodes.length} Direct + {chainCount} Chain)
+                Stable: {listenIp}:{listenPort} | Working: {listenIp}:
+                {workingListenPort} ({endpoints.length} users:{" "}
+                {directNodes.length} Direct + {chainCount} Chain)
               </span>
 
               <span

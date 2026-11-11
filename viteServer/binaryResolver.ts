@@ -35,17 +35,38 @@ export function getSingboxConfigPath(): string {
   return path.join(resolveAppConfigDir(), "config.json");
 }
 
+export function getStableSingboxConfigPath(): string {
+  return path.join(resolveAppConfigDir(), "config.stable.json");
+}
+
+export function getWorkingSingboxConfigPath(): string {
+  return path.join(resolveAppConfigDir(), "config.working.json");
+}
+
 export function getSurgeConfigPath(): string {
   return path.join(resolveAppConfigDir(), "aSingbox127.conf");
+}
+
+export function getStableSurgeConfigPath(): string {
+  return path.join(resolveAppConfigDir(), "aSingbox127.stable.conf");
+}
+
+export function getWorkingSurgeConfigPath(): string {
+  return path.join(resolveAppConfigDir(), "aSingbox127.working.conf");
 }
 
 export function getUiConfigPath(): string {
   return path.join(resolveAppConfigDir(), "ui-config.json");
 }
 
+export function getManagedPidsLedgerPath(): string {
+  return path.join(resolveAppConfigDir(), "managed-pids.json");
+}
+
 export interface PersistedUiConfig {
   listen_ip: string;
   listen_port: number;
+  working_listen_port: number;
   auto_detect_interface: boolean;
   advanced_mode: boolean;
   topbar_icon_style: "monochrome" | "real";
@@ -57,6 +78,7 @@ export function loadUiConfigDisk(): PersistedUiConfig {
   const defaultCfg: PersistedUiConfig = {
     listen_ip: "127.0.0.1",
     listen_port: 11400,
+    working_listen_port: 11401,
     auto_detect_interface: true,
     advanced_mode: false,
     topbar_icon_style: "monochrome",
@@ -71,6 +93,8 @@ export function loadUiConfigDisk(): PersistedUiConfig {
       return {
         listen_ip: String(parsed.listen_ip || defaultCfg.listen_ip),
         listen_port: Number(parsed.listen_port) || defaultCfg.listen_port,
+        working_listen_port:
+          Number(parsed.working_listen_port) || defaultCfg.working_listen_port,
         auto_detect_interface:
           typeof parsed.auto_detect_interface === "boolean"
             ? parsed.auto_detect_interface

@@ -21,12 +21,16 @@ import { PortAvailabilityResult } from "../../types/singbox";
 export const SocksBridgeEndpointPanel: React.FC = () => {
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const workingListenPort = useWorkspaceStore((s) => s.workingListenPort);
   const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
   const includeSurgeProxyGroups = useWorkspaceStore(
     (s) => s.includeSurgeProxyGroups
   );
   const setNetworkParams = useWorkspaceStore((s) => s.setNetworkParams);
   const runningMode = useWorkspaceStore((s) => s.runningMode);
+  const stableSlotStatus = useWorkspaceStore((s) => s.stableSlotStatus);
+  const workingSlotStatus = useWorkspaceStore((s) => s.workingSlotStatus);
+  const setDualSlotStatus = useWorkspaceStore((s) => s.setDualSlotStatus);
   const isStartingService = useWorkspaceStore((s) => s.isStartingService);
   const startOrStopServiceAction = useWorkspaceStore(
     (s) => s.startOrStopServiceAction
@@ -35,6 +39,9 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
 
   const [ipInput, setIpInput] = useState(listenIp);
   const [portInput, setPortInput] = useState(String(listenPort));
+  const [workingPortInput, setWorkingPortInput] = useState(
+    String(workingListenPort)
+  );
   const [isCheckingPort, setIsCheckingPort] = useState(false);
   const [activePid, setActivePid] = useState<number | null>(null);
   const [activeConfigPath, setActiveConfigPath] = useState<string>("");
@@ -44,36 +51,51 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
   useEffect(() => {
     setIpInput(listenIp);
     setPortInput(String(listenPort));
-  }, [listenIp, listenPort]);
+    setWorkingPortInput(String(workingListenPort));
+  }, [listenIp, listenPort, workingListenPort]);
 
   useEffect(() => {
     getSingboxServiceStatus()
       .then((st) => {
         setActivePid(st.pid);
         if (st.config_path) setActiveConfigPath(st.config_path);
+        setDualSlotStatus(st.stable_slot ?? null, st.working_slot ?? null);
       })
       .catch(() => {});
-  }, [runningMode]);
+  }, [runningMode, setDualSlotStatus]);
+
+  const isStableRunning = Boolean(stableSlotStatus?.running);
+  const isWorkingRunning = Boolean(workingSlotStatus?.running);
 
   const handleApplyAndVerifyPort = async () => {
     const parsedPort = Number(portInput) || 11400;
+    let parsedWorkingPort = Number(workingPortInput) || 11401;
+    if (parsedWorkingPort === parsedPort) {
+      parsedWorkingPort = parsedPort + 1;
+      setWorkingPortInput(String(parsedWorkingPort));
+    }
     const cleanIp = ipInput.trim() || "127.0.0.1";
     setIsCheckingPort(true);
     await yieldToNextPaint();
     try {
       if (
-        runningMode !== "stopped" &&
+        isStableRunning &&
         parsedPort === listenPort &&
         cleanIp === listenIp
       ) {
+        setNetworkParams({
+          listenIp: cleanIp,
+          listenPort: parsedPort,
+          workingListenPort: parsedWorkingPort,
+        });
         setPortCheckStatus({
           port: parsedPort,
           host: cleanIp,
           occupied: false,
           available: true,
-          message: `Managed sing-box service (PID ${
-            activePid || "active"
-          }) is currently listening on ${cleanIp}:${parsedPort}.`,
+          message: `Managed Stable Core (PID ${
+            stableSlotStatus?.pid || activePid || "active"
+          }) is currently listening on ${cleanIp}:${parsedPort}; Working Core port set to :${parsedWorkingPort}.`,
         });
         return;
       }
@@ -85,9 +107,10 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
         setNetworkParams({
           listenIp: cleanIp,
           listenPort: parsedPort,
+          workingListenPort: parsedWorkingPort,
         });
         appendLog(
-          `[INFO][BridgePort] Applied & persisted SOCKS5 Bridge endpoint ${cleanIp}:${parsedPort} to ui-config.json, config.json and aSingbox127.conf`
+          `[INFO][BridgePort] Applied & persisted Stable (${cleanIp}:${parsedPort}) & Working (${cleanIp}:${parsedWorkingPort}) endpoints to ui-config.json, config.stable.json and config.working.json`
         );
       }
     } finally {
@@ -97,32 +120,68 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
 
   const handleForceApplyPort = () => {
     const parsedPort = Number(portInput) || 11400;
+    const parsedWorkingPort = Number(workingPortInput) || 11401;
     const cleanIp = ipInput.trim() || "127.0.0.1";
     setNetworkParams({
       listenIp: cleanIp,
       listenPort: parsedPort,
+      workingListenPort: parsedWorkingPort,
     });
     appendLog(
-      `[WARN][BridgePort] Updated & persisted SOCKS5 Bridge port to ${cleanIp}:${parsedPort} in ui-config.json, config.json and aSingbox127.conf.`
+      `[WARN][BridgePort] Updated & persisted SOCKS5 Bridge ports to Stable ${cleanIp}:${parsedPort} / Working ${cleanIp}:${parsedWorkingPort}.`
     );
   };
 
-  const handleToggleService = async () => {
-    if (runningMode !== "stopped") {
-      await startOrStopServiceAction("stop");
-      setActivePid(null);
+  const handleToggleStableService = async () => {
+    if (isStableRunning) {
+      await startOrStopServiceAction("stop", "stable");
       return;
     }
 
     const parsedPort = Number(portInput) || listenPort || 11400;
+    const parsedWorkingPort =
+      Number(workingPortInput) || workingListenPort || 11401;
     const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
-    if (parsedPort !== listenPort || cleanIp !== listenIp) {
+    if (
+      parsedPort !== listenPort ||
+      parsedWorkingPort !== workingListenPort ||
+      cleanIp !== listenIp
+    ) {
       setNetworkParams({
         listenIp: cleanIp,
         listenPort: parsedPort,
+        workingListenPort: parsedWorkingPort,
       });
     }
-    await startOrStopServiceAction("start");
+    await startOrStopServiceAction("start", "stable");
+  };
+
+  const handleToggleWorkingService = async () => {
+    if (isWorkingRunning) {
+      await startOrStopServiceAction("stop", "working");
+      return;
+    }
+
+    const parsedPort = Number(portInput) || listenPort || 11400;
+    let parsedWorkingPort =
+      Number(workingPortInput) || workingListenPort || 11401;
+    if (parsedWorkingPort === parsedPort) {
+      parsedWorkingPort = parsedPort + 1;
+      setWorkingPortInput(String(parsedWorkingPort));
+    }
+    const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
+    if (
+      parsedPort !== listenPort ||
+      parsedWorkingPort !== workingListenPort ||
+      cleanIp !== listenIp
+    ) {
+      setNetworkParams({
+        listenIp: cleanIp,
+        listenPort: parsedPort,
+        workingListenPort: parsedWorkingPort,
+      });
+    }
+    await startOrStopServiceAction("start", "working");
   };
 
   return (
@@ -144,20 +203,35 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
           />
           <div>
             <span style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>
-              Local SOCKS5 Bridge Port &amp; Live Sing-box Process Control
+              Dual Core Control (Stable vs Working Config Isolation)
             </span>
-            {activePid && (
+            {stableSlotStatus?.pid && (
               <span
                 className="badge badge-success"
                 style={{ marginLeft: 8, fontSize: 10.5 }}
               >
-                PID {activePid} Active
+                Stable PID {stableSlotStatus.pid} (:{listenPort})
+              </span>
+            )}
+            {workingSlotStatus?.pid && (
+              <span
+                className="badge badge-warning"
+                style={{ marginLeft: 6, fontSize: 10.5 }}
+              >
+                Working PID {workingSlotStatus.pid} (:{workingListenPort})
               </span>
             )}
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
+          }}
+        >
           <button
             type="button"
             className="btn btn-sm"
@@ -170,26 +244,45 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
           <button
             type="button"
             className={`btn btn-sm ${
-              runningMode !== "stopped" ? "btn-danger" : "btn-primary"
+              isStableRunning ? "btn-danger" : "btn-primary"
             }`}
-            onClick={handleToggleService}
+            onClick={handleToggleStableService}
             disabled={isStartingService || isCheckingPort}
+            title="Start or Stop Stable Core (config.stable.json)"
           >
             {isStartingService ? (
               <Spinner size="small" srText={null} />
-            ) : runningMode !== "stopped" ? (
+            ) : isStableRunning ? (
               <Square size={13} />
             ) : (
               <Play size={13} />
             )}
             <span>
-              {isStartingService
-                ? runningMode !== "stopped"
-                  ? "Stopping..."
-                  : "Starting..."
-                : runningMode !== "stopped"
-                ? `Stop Service (${listenPort})`
-                : `Start Service (${portInput})`}
+              {isStableRunning
+                ? `Stop Stable (:${listenPort})`
+                : `Start Stable (:${portInput})`}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${
+              isWorkingRunning ? "btn-danger" : ""
+            }`}
+            onClick={handleToggleWorkingService}
+            disabled={isStartingService || isCheckingPort}
+            title="Start or Stop Working/Test Core (config.working.json — auto hot-reloads on UI edits)"
+          >
+            {isStartingService ? (
+              <Spinner size="small" srText={null} />
+            ) : isWorkingRunning ? (
+              <Square size={13} />
+            ) : (
+              <Play size={13} />
+            )}
+            <span>
+              {isWorkingRunning
+                ? `Stop Working (:${workingListenPort})`
+                : `Start Working (:${workingPortInput})`}
             </span>
           </button>
         </div>
@@ -204,7 +297,7 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
           marginBottom: "var(--space-3)",
         }}
       >
-        <div style={{ flex: "1 1 140px", minWidth: 120 }}>
+        <div style={{ flex: "1 1 130px", minWidth: 110 }}>
           <label
             style={{
               fontSize: "11px",
@@ -223,7 +316,7 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
             onChange={(e) => setIpInput(e.target.value)}
           />
         </div>
-        <div style={{ flex: "0 1 110px", minWidth: 95 }}>
+        <div style={{ flex: "0 1 115px", minWidth: 95 }}>
           <label
             style={{
               fontSize: "11px",
@@ -232,7 +325,7 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
               marginBottom: "4px",
             }}
           >
-            Listen Port (Default 11400)
+            Stable Port (11400)
           </label>
           <input
             type="number"
@@ -240,6 +333,25 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
             style={{ width: "100%", fontFamily: "var(--font-mono)" }}
             value={portInput}
             onChange={(e) => setPortInput(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: "0 1 120px", minWidth: 95 }}>
+          <label
+            style={{
+              fontSize: "11px",
+              color: "var(--fg-muted)",
+              display: "block",
+              marginBottom: "4px",
+            }}
+          >
+            Working Port (11401)
+          </label>
+          <input
+            type="number"
+            className="text-input"
+            style={{ width: "100%", fontFamily: "var(--font-mono)" }}
+            value={workingPortInput}
+            onChange={(e) => setWorkingPortInput(e.target.value)}
           />
         </div>
         <button
@@ -254,7 +366,7 @@ export const SocksBridgeEndpointPanel: React.FC = () => {
           ) : (
             <Radio size={13} />
           )}
-          {isCheckingPort ? "Checking Port..." : "Verify & Apply Endpoint"}
+          {isCheckingPort ? "Checking..." : "Verify & Apply Ports"}
         </button>
       </div>
 

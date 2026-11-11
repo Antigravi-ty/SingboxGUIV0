@@ -38,9 +38,12 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
 
   const listenIp = useWorkspaceStore((s) => s.listenIp);
   const listenPort = useWorkspaceStore((s) => s.listenPort);
+  const workingListenPort = useWorkspaceStore((s) => s.workingListenPort);
   const autoDetectInterface = useWorkspaceStore((s) => s.autoDetectInterface);
   const setNetworkParams = useWorkspaceStore((s) => s.setNetworkParams);
   const runningMode = useWorkspaceStore((s) => s.runningMode);
+  const stableSlotStatus = useWorkspaceStore((s) => s.stableSlotStatus);
+  const workingSlotStatus = useWorkspaceStore((s) => s.workingSlotStatus);
   const isCheckingConfig = useWorkspaceStore((s) => s.isCheckingConfig);
   const isStartingService = useWorkspaceStore((s) => s.isStartingService);
   const lastCheckResult = useWorkspaceStore((s) => s.lastCheckResult);
@@ -61,6 +64,9 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
 
   const [ipInput, setIpInput] = useState(listenIp);
   const [portInput, setPortInput] = useState(String(listenPort));
+  const [workingPortInput, setWorkingPortInput] = useState(
+    String(workingListenPort)
+  );
   const [isApplyingEndpoint, setIsApplyingEndpoint] = useState(false);
   const [isExportingSurge, setIsExportingSurge] = useState(false);
   const [isExportingJson, setIsExportingJson] = useState(false);
@@ -68,9 +74,13 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
   useEffect(() => {
     setIpInput(listenIp);
     setPortInput(String(listenPort));
-  }, [listenIp, listenPort]);
+    setWorkingPortInput(String(workingListenPort));
+  }, [listenIp, listenPort, workingListenPort]);
 
-  const isServiceRunning = runningMode !== "stopped";
+  const isStableRunning = Boolean(stableSlotStatus?.running);
+  const isWorkingRunning = Boolean(workingSlotStatus?.running);
+  const isServiceRunning =
+    isStableRunning || isWorkingRunning || runningMode !== "stopped";
   const chainCount = Math.max(0, endpoints.length - directNodes.length);
   const unpinnedInsecureNodes = directNodes.filter(
     (n) => n.effectiveInsecure && !n.hasCertFingerprintPin
@@ -85,34 +95,87 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
       1024,
       Math.min(65535, Number(portInput) || 11400)
     );
+    let parsedWorkingPort = Math.max(
+      1024,
+      Math.min(65535, Number(workingPortInput) || 11401)
+    );
+    if (parsedWorkingPort === parsedPort) {
+      parsedWorkingPort = parsedPort < 65535 ? parsedPort + 1 : parsedPort - 1;
+      setWorkingPortInput(String(parsedWorkingPort));
+    }
     setIsApplyingEndpoint(true);
     await yieldToNextPaint();
     try {
-      if (!isServiceRunning || cleanIp !== listenIp || parsedPort !== listenPort) {
+      if (
+        !isStableRunning ||
+        cleanIp !== listenIp ||
+        parsedPort !== listenPort
+      ) {
         const check = await checkBridgePortAvailability(cleanIp, parsedPort);
-        if (check.occupied && !isServiceRunning) {
+        if (check.occupied && !isStableRunning) {
           appendLog(`[WARN][BridgePort] ${check.message}`);
         }
       }
-      setNetworkParams({ listenIp: cleanIp, listenPort: parsedPort });
+      setNetworkParams({
+        listenIp: cleanIp,
+        listenPort: parsedPort,
+        workingListenPort: parsedWorkingPort,
+      });
       appendLog(
-        `[INFO][BridgePort] Persisted endpoint ${cleanIp}:${parsedPort} to ui-config.json, config.json & aSingbox127.conf.`
+        `[INFO][BridgePort] Persisted Stable (${cleanIp}:${parsedPort}) & Working (${cleanIp}:${parsedWorkingPort}) endpoints to ui-config.json, config.stable.json & config.working.json.`
       );
     } finally {
       setIsApplyingEndpoint(false);
     }
   };
 
-  const handleStartOrStop = async () => {
-    if (!isServiceRunning) {
+  const handleToggleStableCore = async () => {
+    if (isStableRunning) {
+      await startOrStopServiceAction("stop", "stable");
+    } else {
       const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
       const parsedPort = Number(portInput) || listenPort || 11400;
-      if (cleanIp !== listenIp || parsedPort !== listenPort) {
-        setNetworkParams({ listenIp: cleanIp, listenPort: parsedPort });
+      const parsedWorkingPort =
+        Number(workingPortInput) || workingListenPort || 11401;
+      if (
+        cleanIp !== listenIp ||
+        parsedPort !== listenPort ||
+        parsedWorkingPort !== workingListenPort
+      ) {
+        setNetworkParams({
+          listenIp: cleanIp,
+          listenPort: parsedPort,
+          workingListenPort: parsedWorkingPort,
+        });
       }
-      await startOrStopServiceAction("start");
+      await startOrStopServiceAction("start", "stable");
+    }
+  };
+
+  const handleToggleWorkingCore = async () => {
+    if (isWorkingRunning) {
+      await startOrStopServiceAction("stop", "working");
     } else {
-      await startOrStopServiceAction("stop");
+      const cleanIp = ipInput.trim() || listenIp || "127.0.0.1";
+      const parsedPort = Number(portInput) || listenPort || 11400;
+      let parsedWorkingPort =
+        Number(workingPortInput) || workingListenPort || 11401;
+      if (parsedWorkingPort === parsedPort) {
+        parsedWorkingPort = parsedPort + 1;
+        setWorkingPortInput(String(parsedWorkingPort));
+      }
+      if (
+        cleanIp !== listenIp ||
+        parsedPort !== listenPort ||
+        parsedWorkingPort !== workingListenPort
+      ) {
+        setNetworkParams({
+          listenIp: cleanIp,
+          listenPort: parsedPort,
+          workingListenPort: parsedWorkingPort,
+        });
+      }
+      await startOrStopServiceAction("start", "working");
     }
   };
 
@@ -120,7 +183,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
     setIsExportingSurge(true);
     await yieldToNextPaint();
     try {
-      await runSingboxCheck();
+      await runSingboxCheck(false);
       triggerBrowserDownload("aSingbox127.conf", surgeConfigText);
       appendLog(
         `[INFO][Export] Exported Surge 5.10 configuration (aSingbox127.conf — D${directNodes.length}+${chainCount} proxies on ${listenIp}:${listenPort}).`
@@ -135,9 +198,9 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
     await yieldToNextPaint();
     try {
       const text = JSON.stringify(singboxConfig, null, 2);
-      triggerBrowserDownload("config.json", text);
+      triggerBrowserDownload("config.stable.json", text);
       appendLog(
-        `[INFO][Export] Exported Sing-box 1.14.4 configuration (config.json — ${endpoints.length} SOCKS5 users).`
+        `[INFO][Export] Exported Sing-box 1.14.4 configuration (config.stable.json — ${endpoints.length} SOCKS5 users).`
       );
     } finally {
       setIsExportingJson(false);
@@ -146,7 +209,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
 
   return (
     <div className="panel" style={{ padding: "var(--space-4)", minWidth: 0 }}>
-      {/* Row 1: Primary Service, Verify, and Export Controls */}
+      {/* Row 1: Dual Core Controls (Stable vs Working) + Verify / Promote + Export */}
       <div
         style={{
           display: "flex",
@@ -166,34 +229,57 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             flexWrap: "wrap",
           }}
         >
-          {/* Start / Stop Service Button with Primer Spinner */}
+          {/* Stable Core Button (Isolated from dynamic editing) */}
           <button
             type="button"
             className={`primer-btn ${
-              isServiceRunning ? "primer-btn-danger" : "primer-btn-primary"
+              isStableRunning ? "primer-btn-danger" : "primer-btn-primary"
             }`}
             disabled={isStartingService}
-            onClick={handleStartOrStop}
+            onClick={handleToggleStableCore}
+            title="Launch or stop Stable Core (config.stable.json). Protected from dynamic UI edits until you click Promote or Start Stable."
           >
             {isStartingService ? (
               <Spinner size="small" srText={null} />
-            ) : isServiceRunning ? (
+            ) : isStableRunning ? (
               <Square size={13} />
             ) : (
               <Play size={13} />
             )}
             <span>
-              {isStartingService
-                ? isServiceRunning
-                  ? "Stopping Service..."
-                  : "Starting Service..."
-                : isServiceRunning
-                ? `Stop Service (:${listenPort})`
-                : `Start Service (:${portInput || listenPort})`}
+              {isStableRunning
+                ? `Stop Stable Core (:${listenPort})`
+                : `Launch Stable Core (:${portInput || listenPort})`}
             </span>
           </button>
 
-          {/* Verify Configuration Button with Primer Spinner */}
+          {/* Working / Test Core Button (Auto hot-reloads on dynamic UI edits, runs on separate port) */}
+          <button
+            type="button"
+            className={`primer-btn ${
+              isWorkingRunning
+                ? "primer-btn-status-attention"
+                : "primer-btn-status-accent"
+            }`}
+            disabled={isStartingService}
+            onClick={handleToggleWorkingCore}
+            title="Launch or stop Working / Test Core (config.working.json) on a separate port. Hot-reloads automatically when you tweak multi-hop or TLS settings without freezing Stable Core."
+          >
+            {isStartingService ? (
+              <Spinner size="small" srText={null} />
+            ) : isWorkingRunning ? (
+              <Square size={13} />
+            ) : (
+              <Play size={13} />
+            )}
+            <span>
+              {isWorkingRunning
+                ? `Stop Working Core (:${workingListenPort})`
+                : `Launch Working Core (:${workingPortInput || workingListenPort})`}
+            </span>
+          </button>
+
+          {/* Verify Working Config Button */}
           <button
             type="button"
             className={`primer-btn ${
@@ -204,8 +290,8 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
                 : ""
             }`}
             disabled={isCheckingConfig}
-            onClick={() => void runSingboxCheck()}
-            title="Write config.json & aSingbox127.conf to Application Support and verify with sing-box check"
+            onClick={() => void runSingboxCheck(false)}
+            title="Validate config.working.json with sing-box check (does NOT overwrite config.stable.json)"
           >
             {isCheckingConfig ? (
               <Spinner size="small" srText={null} />
@@ -217,8 +303,20 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
               <CheckCircle2 size={13} />
             )}
             <span>
-              {isCheckingConfig ? "Verifying..." : "Verify Configuration"}
+              {isCheckingConfig ? "Verifying..." : "Verify Working"}
             </span>
+          </button>
+
+          {/* Promote Working -> Stable Snapshot Button */}
+          <button
+            type="button"
+            className="primer-btn"
+            disabled={isCheckingConfig}
+            onClick={() => void runSingboxCheck(true)}
+            title="Promote and save current Working configuration into config.stable.json & aSingbox127.stable.conf"
+          >
+            <CheckCircle2 size={13} />
+            <span>Promote Working → Stable</span>
           </button>
 
           {directNodes.length === 0 && (
@@ -263,7 +361,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             className="primer-btn"
             disabled={isExportingJson}
             onClick={handleExportSingboxJson}
-            title="Export Sing-box 1.14.4 config.json"
+            title="Export Sing-box 1.14.4 config.stable.json"
           >
             {isExportingJson ? (
               <Spinner size="small" srText={null} />
@@ -277,7 +375,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             type="button"
             className="primer-btn"
             onClick={() => openAppConfigFolder().catch(() => {})}
-            title="Open Application Support directory containing config.json, aSingbox127.conf & ui-config.json"
+            title="Open Application Support directory containing config.stable.json, config.working.json, aSingbox127.conf & ui-config.json"
           >
             <FolderOpen size={13} />
             <span>Open Config Folder</span>
@@ -285,7 +383,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Row 2: Bind IP, Listen Port, and Enhanced Mode (auto_detect_interface) Switch */}
+      {/* Row 2: Bind IP, Stable Port, Working Port, and Enhanced Mode (auto_detect_interface) Switch */}
       <div
         style={{
           display: "flex",
@@ -318,7 +416,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             <input
               type="text"
               className="primer-input"
-              style={{ width: 128, fontFamily: "var(--font-mono)" }}
+              style={{ width: 120, fontFamily: "var(--font-mono)" }}
               value={ipInput}
               onChange={(e) => setIpInput(e.target.value)}
             />
@@ -331,18 +429,42 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
               gap: 6,
               fontSize: 12,
             }}
+            title="Port used by config.stable.json (Stable Production Core)"
           >
             <span style={{ color: "var(--fg-muted)", fontWeight: 500 }}>
-              SOCKS5 Port
+              Stable Port
             </span>
             <input
               type="number"
               className="primer-input"
-              style={{ width: 92, fontFamily: "var(--font-mono)" }}
+              style={{ width: 86, fontFamily: "var(--font-mono)" }}
               min={1024}
               max={65535}
               value={portInput}
               onChange={(e) => setPortInput(e.target.value)}
+            />
+          </label>
+
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+            }}
+            title="Port used by config.working.json (Dynamic Hot-Reload Test Core)"
+          >
+            <span style={{ color: "var(--fg-muted)", fontWeight: 500 }}>
+              Working Port
+            </span>
+            <input
+              type="number"
+              className="primer-input"
+              style={{ width: 86, fontFamily: "var(--font-mono)" }}
+              min={1024}
+              max={65535}
+              value={workingPortInput}
+              onChange={(e) => setWorkingPortInput(e.target.value)}
             />
           </label>
 
@@ -351,14 +473,14 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             className="primer-btn"
             disabled={isApplyingEndpoint}
             onClick={handleApplyIpAndPort}
-            title="Apply Bind IP & Port and persist to ui-config.json"
+            title="Apply Bind IP, Stable Port & Working Port and persist to ui-config.json"
           >
             {isApplyingEndpoint ? (
               <Spinner size="small" srText={null} />
             ) : (
               <Radio size={13} />
             )}
-            <span>Apply IP &amp; Port</span>
+            <span>Apply Ports</span>
           </button>
         </div>
 
@@ -388,7 +510,7 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             onChange={(checked: boolean) => {
               setNetworkParams({ autoDetectInterface: checked });
               appendLog(
-                `[INFO][Config] Persisted route.auto_detect_interface = ${checked} to ui-config.json & config.json`
+                `[INFO][Config] Persisted route.auto_detect_interface = ${checked} to ui-config.json & config.working.json`
               );
             }}
           />
@@ -456,7 +578,9 @@ export const SimplifiedConsoleControlBar: React.FC = () => {
             {lastCheckResult.version} • {lastCheckResult.commandOutput}
           </span>
           <span>
-            Synced: config.json, aSingbox127.conf, ui-config.json
+            Profiles: config.stable.json (:{listenPort}){" "}
+            {isStableRunning ? "[RUNNING]" : "[STANDBY]"} | config.working.json
+            (:{workingListenPort}) {isWorkingRunning ? "[RUNNING]" : "[HOT-RELOAD]"}
           </span>
         </div>
       )}

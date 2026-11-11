@@ -256,7 +256,8 @@ export function validateSingboxSchemaLocally(
 
 export async function validateSingboxConfigWithCore(
   configJsonText: string,
-  surgeConfigText?: string
+  surgeConfigText?: string,
+  promoteToStable?: boolean
 ): Promise<SingboxCheckResult> {
   const checkedAt = getCurrentFormattedTime();
   try {
@@ -268,12 +269,15 @@ export async function validateSingboxConfigWithCore(
       binary_path?: string;
       config_dir?: string;
       singbox_config_path?: string;
+      stable_config_path?: string;
+      working_config_path?: string;
       surge_config_path?: string;
       summary?: ConfigInspectSummary;
       service_reloaded?: boolean;
     }>("validate_singbox_config_cmd", {
       configContent: configJsonText,
       surgeContent: surgeConfigText,
+      promoteToStable: Boolean(promoteToStable),
     });
     return {
       valid: res.valid,
@@ -284,6 +288,8 @@ export async function validateSingboxConfigWithCore(
       binaryPath: res.binary_path,
       configDir: res.config_dir,
       singboxConfigPath: res.singbox_config_path,
+      stableConfigPath: res.stable_config_path,
+      workingConfigPath: res.working_config_path,
       surgeConfigPath: res.surge_config_path,
       summary: res.summary,
       serviceReloaded: res.service_reloaded,
@@ -303,6 +309,7 @@ export async function validateSingboxConfigWithCore(
         body: JSON.stringify({
           configContent: configJsonText,
           surgeContent: surgeConfigText,
+          promoteToStable: Boolean(promoteToStable),
         }),
       });
       if (apiRes.ok) {
@@ -333,6 +340,8 @@ export async function validateSingboxConfigWithCore(
           binaryPath: data.binary_path,
           configDir: data.config_dir,
           singboxConfigPath: data.singbox_config_path,
+          stableConfigPath: data.stable_config_path,
+          workingConfigPath: data.working_config_path,
           surgeConfigPath: data.surge_config_path,
           summary: data.summary,
           serviceReloaded: Boolean(data.service_reloaded),
@@ -370,7 +379,7 @@ export async function checkCoreBinaryStatus(): Promise<BinaryStatusInfo> {
         "~/Library/Application Support/com.antigravity.singboxguiv0/sing-box",
       config_dir: "~/Library/Application Support/com.antigravity.singboxguiv0",
       singbox_config_path:
-        "~/Library/Application Support/com.antigravity.singboxguiv0/config.json",
+        "~/Library/Application Support/com.antigravity.singboxguiv0/config.stable.json",
       surge_config_path:
         "~/Library/Application Support/com.antigravity.singboxguiv0/aSingbox127.conf",
       file_size: 0,
@@ -434,17 +443,20 @@ export async function openAppConfigFolder(): Promise<ConfigInspectSummary> {
 
 export async function startSingboxService(
   configJsonText: string,
-  surgeConfigText?: string
+  surgeConfigText?: string,
+  profile: "stable" | "working" = "stable"
 ): Promise<SingboxServiceStatus> {
   try {
     return await invoke<SingboxServiceStatus>("start_singbox_service_cmd", {
       configContent: configJsonText,
       surgeContent: surgeConfigText,
+      profile,
     });
   } catch (tauriErr: any) {
     const msg = String(tauriErr?.message || tauriErr || "");
     if (
       msg.includes("sing-box exited") ||
+      msg.includes("sing-box (") ||
       msg.includes("sing-box check") ||
       msg.includes("Failed to spawn") ||
       msg.includes("binary not found")
@@ -457,6 +469,7 @@ export async function startSingboxService(
       body: JSON.stringify({
         configContent: configJsonText,
         surgeContent: surgeConfigText,
+        profile,
       }),
     });
     const data = await apiRes.json();
@@ -467,13 +480,18 @@ export async function startSingboxService(
   }
 }
 
-export async function stopSingboxService(): Promise<SingboxServiceStatus> {
+export async function stopSingboxService(
+  profile?: "stable" | "working" | "all"
+): Promise<SingboxServiceStatus> {
   try {
-    return await invoke<SingboxServiceStatus>("stop_singbox_service_cmd");
+    return await invoke<SingboxServiceStatus>("stop_singbox_service_cmd", {
+      profile,
+    });
   } catch {
     const apiRes = await fetch("/__singbox_api/service-stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile }),
     });
     if (apiRes.ok) {
       return await apiRes.json();

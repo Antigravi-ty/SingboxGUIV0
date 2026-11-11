@@ -183,6 +183,17 @@ export interface ConfigInspectSummary {
   empty_workspace: boolean;
 }
 
+export type CoreProfileSlot = "stable" | "working";
+
+export interface CoreSlotStatusInfo {
+  profile: CoreProfileSlot | string;
+  running: boolean;
+  pid: number | null;
+  config_path: string;
+  surge_config_path: string;
+  listen_address: string;
+}
+
 export interface SingboxCheckResult {
   valid: boolean;
   version: string;
@@ -192,6 +203,8 @@ export interface SingboxCheckResult {
   binaryPath?: string;
   configDir?: string;
   singboxConfigPath?: string;
+  stableConfigPath?: string;
+  workingConfigPath?: string;
   surgeConfigPath?: string;
   summary?: ConfigInspectSummary;
   serviceReloaded?: boolean;
@@ -214,13 +227,18 @@ export interface BinaryStatusInfo {
 export interface SingboxServiceStatus {
   running: boolean;
   pid: number | null;
+  active_profile?: string;
   binary_path: string;
   config_path: string;
+  stable_config_path?: string;
+  working_config_path?: string;
   surge_config_path: string;
   config_dir: string;
   listen_address: string;
   message: string;
   recent_logs: string[];
+  stable_slot?: CoreSlotStatusInfo;
+  working_slot?: CoreSlotStatusInfo;
 }
 
 export type ConnectivityTestMethod =

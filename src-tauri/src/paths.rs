@@ -29,12 +29,32 @@ pub fn default_singbox_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_config_dir(app)?.join("config.json"))
 }
 
+pub fn stable_singbox_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("config.stable.json"))
+}
+
+pub fn working_singbox_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("config.working.json"))
+}
+
 pub fn default_surge_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_config_dir(app)?.join("aSingbox127.conf"))
 }
 
+pub fn stable_surge_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("aSingbox127.stable.conf"))
+}
+
+pub fn working_surge_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("aSingbox127.working.conf"))
+}
+
 pub fn default_ui_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_config_dir(app)?.join("ui-config.json"))
+}
+
+pub fn managed_pids_ledger_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_config_dir(app)?.join("managed-pids.json"))
 }
 
 fn target_sidecar_filenames() -> Vec<&'static str> {

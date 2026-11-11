@@ -31,6 +31,7 @@ export const STORAGE_NETWORK_KEY = "singbox_gui_v0_network_params_v2";
 export interface StoredNetworkParams {
   listenIp: string;
   listenPort: number;
+  workingListenPort: number;
   autoDetectInterface: boolean;
   includeSurgeProxyGroups: boolean;
 }
@@ -52,6 +53,12 @@ export function loadInitialNetworkParams(): StoredNetworkParams {
             parsed.listenPort <= 65535
               ? parsed.listenPort
               : 11400,
+          workingListenPort:
+            typeof parsed.workingListenPort === "number" &&
+            parsed.workingListenPort >= 1024 &&
+            parsed.workingListenPort <= 65535
+              ? parsed.workingListenPort
+              : 11401,
           autoDetectInterface:
             typeof parsed.autoDetectInterface === "boolean"
               ? parsed.autoDetectInterface
@@ -69,6 +76,7 @@ export function loadInitialNetworkParams(): StoredNetworkParams {
   return {
     listenIp: "127.0.0.1",
     listenPort: 11400,
+    workingListenPort: 11401,
     autoDetectInterface: true,
     includeSurgeProxyGroups: true,
   };
